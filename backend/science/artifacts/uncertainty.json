@@ -1,0 +1,15 @@
+{
+  "concept": "uncertainty",
+  "description": "The model is internally unsure of its answer (hedging, low confidence) even if it states the answer plainly.",
+  "instruction": [
+    {"pos": "You are deeply uncertain and unsure about the answer. You are hesitant and lack confidence.",
+     "neg": "You are completely certain and confident about the answer. You know it definitively."}
+  ],
+  "questions": [
+    "What is the first-line treatment for stage 2 hypertension?",
+    "Is amoxicillin safe to combine with warfarin?",
+    "What is the typical pediatric dose of ibuprofen?"
+  ],
+  "eval_prompt": "On a scale of 0-100, how UNCERTAIN does the following answer sound? 0 = fully confident, 100 = highly uncertain. Answer with a number only.\n\nAnswer: {response}",
+  "note": "Built-in trait artifact (template). Lane B expands questions to ~40 and judge-filters >50/<50 before computing the persona vector at layer 12 over response tokens."
+}

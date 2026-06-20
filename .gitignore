@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Env / secrets
+.env
+.env.local
+
+# ML artifacts (persona vectors / calibrators are regenerated; don't commit large blobs)
+backend/science/vectors/*.pt
+backend/science/vectors/*.pkl
+*.safetensors
+*.ckpt
+hf_cache/
+.cache/
+
+# Data (pre-cached datasets)
+data/
+*.parquet
+
+# Node / frontend
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# Phoenix / traces
+.phoenix/
+*.db
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log
