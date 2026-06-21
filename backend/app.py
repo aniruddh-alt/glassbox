@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from . import config, labels, runtime
+from . import config, labels, observability, runtime, sentry_api
 from .analyze import analyze_turn
 from .fanout import fanout, init_sponsors
 
@@ -33,6 +33,30 @@ def _startup() -> None:
 @app.get("/api/health")
 def health() -> dict:
     return runtime.health_payload()
+
+
+@app.get("/api/observability")
+async def observability_endpoint():
+    """Return the in-process store snapshot merged with health, Sentry, and Phoenix UI URL.
+    Never contains prompt or response text (store holds only redacted views)."""
+    snap = observability.STORE.snapshot()
+    snap["health"] = runtime.health_payload()
+    snap["sentry"] = {
+        "configured": bool(config.SENTRY_AUTH_TOKEN),
+        "deep_link": sentry_api.deep_link(),
+        "issues": await sentry_api.list_recent_issues(),
+    }
+    snap["phoenix_ui_url"] = config.PHOENIX_UI_URL
+    return snap
+
+
+@app.post("/api/observability/eval")
+async def observability_eval():
+    """Run a Phoenix batch coherence eval (labels-only, no prompt/response).
+    coherence_eval is imported lazily so this task ships before that module exists."""
+    from starlette.concurrency import run_in_threadpool
+    from . import coherence_eval  # noqa: PLC0415 — intentionally lazy
+    return await run_in_threadpool(coherence_eval.run_eval)
 
 
 def _chunks(text: str) -> list[str]:
