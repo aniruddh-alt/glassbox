@@ -1111,7 +1111,7 @@ export function ChatPanel({
 ```tsx
 // Root view. Left: multi-turn clinician chat. Right: cognition stage (feature field + probes +
 // Claude verdict) reflecting the LATEST message's CognitionEvent. Real /api/chat (no mock).
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import "./styles.css";
 import type { CognitionEvent } from "./types";
@@ -1125,7 +1125,6 @@ export function App() {
   const { answer, event, status, send } = useCognitionStream();
   const [thread, setThread] = useState<Msg[]>([]);
   const [latest, setLatest] = useState<CognitionEvent | null>(null);
-  const committedRef = useRef(0);
 
   function onSend(content: string) {
     const history: Msg[] = [...thread, { role: "user", content }];
@@ -1134,6 +1133,7 @@ export function App() {
   }
 
   // Commit the assistant turn + capture its event when a stream finishes.
+  // The "last msg is user" guard makes this idempotent across re-renders.
   useEffect(() => {
     if (status === "done") {
       setThread((t) => (t.length && t[t.length - 1].role === "user"
@@ -1143,7 +1143,6 @@ export function App() {
       setThread((t) => (t.length && t[t.length - 1].role === "user"
         ? [...t, { role: "assistant", content: "[generation failed]" }] : t));
     }
-    committedRef.current += 1;
   }, [status]);
 
   const features = useMemo(() => latest?.features ?? [], [latest]);
@@ -1264,7 +1263,7 @@ In `frontend/src/App.tsx`, add the import:
 import { useHealth, MODE_BADGE } from "./health";
 ```
 
-Inside `App`, add `const health = useHealth();` near the other hooks, and prefer health for the header identity (falling back to the latest event, then placeholders):
+Inside `App`, add `const health = useHealth();` near the other hooks. **Replace** the existing `const modelName = latest?.model ?? "model";` line from Task 7 with the two lines below (do not add a second `modelName` declaration), so the header prefers health, then the latest event, then a placeholder:
 
 ```tsx
   const modelName = latest?.model ?? health?.model ?? "model";
