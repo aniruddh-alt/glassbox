@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,7 +45,9 @@ async def chat(body: dict):
     """Generate (or synthesize) a turn, stream token lines, then exactly one event line.
     fanout() runs AFTER the event line so nothing blocks the stream."""
     messages = body.get("messages") or []
-    answer, event = await run_in_threadpool(analyze_turn, messages)
+    turn_start_ns = time.time_ns()
+    answer, event, perf = await run_in_threadpool(analyze_turn, messages)
+    perf["t0_ns"] = turn_start_ns
     payload = event.model_dump()
 
     async def gen():
@@ -55,7 +58,7 @@ async def chat(body: dict):
             await asyncio.sleep(_TOKEN_CADENCE_S)
         yield json.dumps(payload) + "\n"
         try:
-            fanout(payload)
+            fanout(payload, perf)
         except Exception as e:  # never let a sponsor error break the completed stream
             print(f"[app] fanout failed: {e}")
 
@@ -66,7 +69,7 @@ async def chat(body: dict):
 async def analyze(body: dict):
     """Post-hoc / non-streaming variant: returns the CognitionEvent as JSON."""
     messages = body.get("messages") or []
-    _, event = await run_in_threadpool(analyze_turn, messages)
+    _, event, _perf = await run_in_threadpool(analyze_turn, messages)
     return JSONResponse(event.model_dump())
 
 

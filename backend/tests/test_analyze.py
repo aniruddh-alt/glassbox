@@ -4,7 +4,7 @@ from backend.schema import CognitionEvent
 
 def test_analyze_turn_fallback_builds_valid_event():
     runtime.STATE.update(mode="fallback", model_loaded=False, sae_loaded=False)
-    answer, event = analyze.analyze_turn(
+    answer, event, perf = analyze.analyze_turn(
         [{"role": "user", "content": "Is metformin safe during pregnancy?"}]
     )
     assert isinstance(answer, str) and answer.strip()
@@ -52,7 +52,7 @@ def test_real_turn_uses_pod_client_and_ranks(monkeypatch):
     import backend.pod_client as pc
 
     monkeypatch.setattr(pc, "turn", fake_turn)
-    answer, event = analyze.analyze_turn([{"role": "user", "content": "hi"}])
+    answer, event, perf = analyze.analyze_turn([{"role": "user", "content": "hi"}])
     assert answer == "pod answer"
     assert [f.index for f in event.features] == [2, 1]
     assert event.features[0].label == "label-2"
@@ -64,6 +64,42 @@ def test_real_turn_degrades_on_pod_failure(monkeypatch):
 
     monkeypatch.setattr(pc, "turn", lambda *a, **k: (_ for _ in ()).throw(pc.PodError("down")))
     monkeypatch.setattr(analyze.runtime, "refresh_pod_health", lambda: None)
-    answer, event = analyze.analyze_turn([{"role": "user", "content": "Is ibuprofen safe?"}])
+    answer, event, perf = analyze.analyze_turn([{"role": "user", "content": "Is ibuprofen safe?"}])
     assert isinstance(answer, str) and answer.strip()
     assert len(event.features) > 0
+
+
+def test_analyze_turn_returns_perf(monkeypatch):
+    """analyze_turn must return a 3-tuple (answer, event, perf) with timing fields."""
+    runtime.STATE.update(mode="real", model_loaded=True, sae_loaded=True)
+    monkeypatch.setattr(
+        analyze.labels,
+        "get_feature_stats",
+        lambda i, **k: {"label": f"label-{i}", "max_act": 1.0, "density": 0.001},
+    )
+
+    def fake_turn_with_timings(messages, max_new=None):
+        return {
+            "answer": "timed answer",
+            "candidates": [{"index": 1, "act": 1.0, "attr": 0.5, "source": "s"}],
+            "trackers": {},
+            "reliable": True,
+            "timings": {"capture": 10.0, "sae": 5.0, "trackers": 2.0},
+        }
+
+    import backend.pod_client as pc
+
+    monkeypatch.setattr(pc, "turn", fake_turn_with_timings)
+    result = analyze.analyze_turn([{"role": "user", "content": "Is aspirin safe?"}])
+    assert len(result) == 3, "analyze_turn must return 3-tuple (answer, event, perf)"
+    answer, event, perf = result
+    assert answer == "timed answer"
+    assert isinstance(event, CognitionEvent)
+    # perf shape
+    assert "turn_ms" in perf and isinstance(perf["turn_ms"], float)
+    assert "stages" in perf
+    assert "pod_roundtrip" in perf["stages"]
+    assert "pod_stages" in perf
+    assert perf["pod_stages"].get("capture") == 10.0
+    assert perf["pod_stages"].get("sae") == 5.0
+    assert perf["pod_stages"].get("trackers") == 2.0
