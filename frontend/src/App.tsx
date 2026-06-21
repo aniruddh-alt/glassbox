@@ -10,12 +10,14 @@ import { ChatPanel, type Msg } from "./components/ChatPanel";
 import { FeatureField } from "./components/FeatureField";
 import { ProbePanel } from "./components/ProbePanel";
 import { AdjudicationBanner } from "./components/AdjudicationBanner";
+import { ObservabilityPage } from "./ObservabilityPage";
 
 export function App() {
   const { answer, event, status, send } = useCognitionStream();
   const [thread, setThread] = useState<Msg[]>([]);
   const [latest, setLatest] = useState<CognitionEvent | null>(null);
   const health = useHealth();
+  const [view, setView] = useState<"chat" | "observe">("chat");
 
   function onSend(content: string) {
     const history: Msg[] = [...thread, { role: "user", content }];
@@ -49,10 +51,21 @@ export function App() {
           <span className="pill">{modelName} · L{layerLabel}</span>
           {health && <span className={`badge ${health.mode}`}>{MODE_BADGE[health.mode]}</span>}
         </div>
+        <nav className="app-nav">
+          <button
+            className={`app-nav-btn${view === "chat" ? " active" : ""}`}
+            onClick={() => setView("chat")}
+          >Chat</button>
+          <button
+            className={`app-nav-btn${view === "observe" ? " active" : ""}`}
+            onClick={() => setView("observe")}
+          >Observe</button>
+        </nav>
         <div className="live"><span className="d" />Live</div>
       </header>
 
-      <main>
+      {/* Chat view — stays MOUNTED when on Observe to preserve in-flight stream + history */}
+      <main style={{ display: view === "chat" ? "" : "none" }}>
         <ChatPanel
           thread={thread}
           pending={status === "streaming" ? answer : null}
@@ -69,6 +82,9 @@ export function App() {
           </p>
         </section>
       </main>
+
+      {/* Observe view — mounted lazily but kept alive once first rendered */}
+      {view === "observe" && <ObservabilityPage />}
     </div>
   );
 }
