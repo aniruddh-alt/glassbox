@@ -9,7 +9,7 @@ from . import prompts, tools
 _MAX_TURNS = 12
 
 
-def run_interp_agent(tracker_id: str, *, client=None, generate_fn=None) -> dict:
+def run_interp_agent(tracker_id: str, *, client=None, generate_fn=None) -> dict | None:
     job = cs.get_job(tracker_id)
     if job is None:
         raise ValueError(f"unknown tracker_id: {tracker_id}")
@@ -42,6 +42,8 @@ def run_interp_agent(tracker_id: str, *, client=None, generate_fn=None) -> dict:
             if block.type == "tool_use":
                 out = tools.dispatch(block.name, block.input, ctx)
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": out})
+        if not results:
+            break
         messages.append({"role": "user", "content": results})
         if cs.get_job(tracker_id)["status"] in ("ready", "rejected"):
             break
