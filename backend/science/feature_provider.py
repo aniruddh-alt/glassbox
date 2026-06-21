@@ -29,11 +29,13 @@ class FeatureProvider:
         text,
         activations=None,
         token_ids=None,
+        special_ids=None,
         k: int = config.TOPK,
         cap: int = config.TOPK_EVENT,
     ) -> list[dict]:
-        """Return up to `cap` deduped, activation-ranked {index, act, source} dicts for a response.
-        Labels are attached downstream by labels.py."""
+        """Return up to `cap` deduped, activation-ranked {index, act, source} dicts.
+        token_ids: per-position ids aligned to `activations`. special_ids: ids to skip.
+        Labels are attached downstream."""
         raise NotImplementedError
 
 
@@ -48,6 +50,7 @@ class LocalSAEProvider(FeatureProvider):
         text,
         activations=None,
         token_ids=None,
+        special_ids=None,
         k: int = config.TOPK,
         cap: int = config.TOPK_EVENT,
     ) -> list[dict]:
@@ -55,12 +58,10 @@ class LocalSAEProvider(FeatureProvider):
             raise ValueError(
                 "LocalSAEProvider needs captured activations [n_positions, d_in]"
             )
-        special = set(
-            token_ids or []
-        )  # caller passes special-token ids to skip, if any
+        special = set(special_ids or [])
         best: dict[int, float] = {}
         for pos in range(activations.shape[0]):
-            if token_ids is not None and token_ids[pos] in special:
+            if token_ids is not None and pos < len(token_ids) and token_ids[pos] in special:
                 continue
             for f in sae_topk(activations[pos], k=k):
                 best[f["index"]] = max(best.get(f["index"], 0.0), f["act"])
@@ -82,6 +83,7 @@ class NeuronpediaProvider(FeatureProvider):
         text,
         activations=None,
         token_ids=None,
+        special_ids=None,
         k: int = config.TOPK,
         cap: int = config.TOPK_EVENT,
     ) -> list[dict]:
