@@ -142,6 +142,10 @@ def judge_filter(spec: dict, rows: list[dict], *, client=None, judge_model: str 
     )
     text = next(b.text for b in resp.content if b.type == "text")
     scores = json.loads(text)["scores"]
+    if len(scores) != len(responses):
+        raise ValueError(
+            f"judge returned {len(scores)} scores for {len(responses)} responses"
+        )
 
     kept: list[dict] = []
     for row, score in zip(rows, scores):

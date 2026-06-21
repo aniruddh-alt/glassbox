@@ -48,4 +48,7 @@ def run_interp_agent(tracker_id: str, *, client=None, generate_fn=None) -> dict 
         if cs.get_job(tracker_id)["status"] in ("ready", "rejected"):
             break
 
+    job = cs.get_job(tracker_id)
+    if job is not None and job["status"] not in ("ready", "rejected", "error"):
+        cs.update_job(tracker_id, status="error", error="agent did not finalize within MAX_TURNS")
     return cs.get_job(tracker_id)
