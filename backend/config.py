@@ -25,6 +25,11 @@ BUILTIN_TRACKERS = ["uncertainty", "harmful", "hallucination"]
 # Thresholds are calibrated offline (validation/) and loaded from science/vectors/thresholds.json.
 DEFAULT_THRESHOLD = 0.5
 
+# --- Interpretability Agent ---
+TRACK_AUROC_TAU = float(os.getenv("TRACK_AUROC_TAU", "0.75"))  # deploy gate
+AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-opus-4-8")
+JUDGE_MODEL = os.getenv("JUDGE_MODEL", "claude-opus-4-8")
+
 # --- Runtime ---
 MODE = os.getenv("GLASSBOX_MODE", "posthoc")  # posthoc | live
 DEVICE = os.getenv("DEVICE", "cuda")
