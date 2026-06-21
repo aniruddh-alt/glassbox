@@ -43,9 +43,9 @@ export interface CognitionEvent {
   layer: number;
   io: IO;
 
-  // Family B — reliable
-  uncertainty: number;
-  uncertainty_proj: number;
+  // Family B — reliable signal; null until calibrated probes are registered (WIP)
+  uncertainty: number | null;
+  uncertainty_proj: number | null;
   uncertainty_proj_pre?: number | null;
   flag: boolean;
   severity: Severity;

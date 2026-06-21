@@ -17,26 +17,35 @@ def build_cognition_event(
     response: str,
     trackers: dict,
     features: list,
-    model: str = "gemma-2-2b-it",
-    layer: int = 12,
+    model: str,
+    layer: int,
 ) -> CognitionEvent:
-    """trackers: dict[str -> {score,proj,flag,...}] from science.persona.score_all_trackers.
-    features: list[Feature-like dicts] from science.sae.sae_topk (labels already attached).
+    """trackers: dict[str -> {score,proj,flag,...}] from persona.score_all_trackers ({} until
+    probes exist). features: list[Feature-like dicts] with labels already attached.
+
+    Family B is WIP: with no "uncertainty" tracker, the meter fields stay null and flag is False.
     """
-    unc = trackers.get("uncertainty", {})
-    flag = bool(unc.get("flag", unc.get("score", 0.0) >= DEFAULT_THRESHOLD))
+    unc = trackers.get("uncertainty")
+    if unc is None:
+        uncertainty = uncertainty_proj = uncertainty_proj_pre = None
+        flag = False
+    else:
+        uncertainty = unc.get("score")
+        uncertainty_proj = unc.get("proj")
+        uncertainty_proj_pre = unc.get("proj_pre")
+        flag = bool(unc.get("flag", (uncertainty or 0.0) >= DEFAULT_THRESHOLD))
     return CognitionEvent(
         message_id=message_id,
         ts=ts,
         model=model,
         layer=layer,
         io=IO(user_msg=user_msg, response=response),
-        uncertainty=unc.get("score", 0.0),
-        uncertainty_proj=unc.get("proj", 0.0),
-        uncertainty_proj_pre=unc.get("proj_pre"),
+        uncertainty=uncertainty,
+        uncertainty_proj=uncertainty_proj,
+        uncertainty_proj_pre=uncertainty_proj_pre,
         flag=flag,
         severity="warning" if flag else "info",
         trackers=trackers,
         features=features,
-        adjudication=None,  # filled async by fanout → claude judge if flag
+        adjudication=None,
     )

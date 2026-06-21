@@ -12,7 +12,7 @@ export function isSuspect(f: Feature): boolean {
 }
 
 const f = (index: number, label: string, act: number, suspect = false, tracked: string | null = null): Feature => ({
-  index, label, act, source: "12-gemmascope-res-16k",
+  index, label, act, source: "17-gemmascope-2-res-16k",
   caveat: suspect ? SUSPECT_CAVEAT : DEFAULT_CAVEAT, tracked,
 });
 
@@ -22,8 +22,8 @@ export const DEMO_EVENT: CognitionEvent = {
   type: "event",
   message_id: "demo-ibuprofen",
   ts: 1718841600,
-  model: "gemma-2-2b-it",
-  layer: 12,
+  model: "unsloth/gemma-3-4b-it",
+  layer: 17,
   io: {
     user_msg: "Is ibuprofen safe to take in the third trimester of pregnancy?",
     response:

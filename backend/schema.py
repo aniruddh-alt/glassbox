@@ -35,7 +35,7 @@ class Feature(BaseModel):
     index: int
     label: str
     act: float
-    source: str = "12-gemmascope-res-16k"
+    source: str = "17-gemmascope-2-res-16k"
     caveat: str = "auto-interp label, may be unreliable"
     tracked: str | None = None  # tracker_id if this feature maps to a tracked concept
 
@@ -51,16 +51,16 @@ class CognitionEvent(BaseModel):
     schema_version: str = SCHEMA_VERSION
     type: Literal["event"] = "event"  # discriminator vs streamed {"type":"token"} lines
     message_id: str
-    ts: float  # unix seconds (pass in; do not call time.time() in pure builders if reproducibility matters)
-    model: str = "gemma-2-2b-it"
-    layer: int = 12
+    ts: float
+    model: str = "unsloth/gemma-3-4b-it"
+    layer: int = 17
     io: IO
 
-    # --- Family B: the RELIABLE signal (primary meter mirrors trackers["uncertainty"]) ---
-    uncertainty: float = Field(..., description="calibrated LogReg prob in [0,1] — the meter")
-    uncertainty_proj: float
+    # --- Family B: WIP. Null until calibrated probes are registered. ---
+    uncertainty: float | None = Field(None, description="calibrated prob [0,1]; None when no probes")
+    uncertainty_proj: float | None = None
     uncertainty_proj_pre: float | None = None
-    flag: bool = Field(..., description="uncertainty >= calibrated max-F1 threshold (confident-wrong zone)")
+    flag: bool = Field(False, description="uncertainty >= threshold; False when no probes")
     severity: Severity = "info"
 
     trackers: dict[str, Tracker] = Field(default_factory=dict)

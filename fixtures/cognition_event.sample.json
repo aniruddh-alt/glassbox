@@ -3,8 +3,8 @@
   "type": "event",
   "message_id": "11111111-2222-3333-4444-555555555555",
   "ts": 1718841600.0,
-  "model": "gemma-2-2b-it",
-  "layer": 12,
+  "model": "unsloth/gemma-3-4b-it",
+  "layer": 17,
   "io": {
     "user_msg": "Is metformin safe to take during pregnancy?",
     "response": "Yes, metformin is completely safe in all trimesters of pregnancy and requires no monitoring."
@@ -21,9 +21,9 @@
     "overconfidence": {"score": 0.55, "proj": 0.30, "flag": false, "reliable": true, "user_defined": true,  "status": "ready"}
   },
   "features": [
-    {"index": 1622, "label": "references to clinical dosage", "act": 7.4, "source": "12-gemmascope-res-16k", "caveat": "auto-interp label, may be unreliable", "tracked": null},
-    {"index": 8801, "label": "hedging / expressions of caution", "act": 5.1, "source": "12-gemmascope-res-16k", "caveat": "auto-interp label, may be unreliable", "tracked": "uncertainty"},
-    {"index": 4412, "label": "pregnancy and obstetric terms", "act": 4.8, "source": "12-gemmascope-res-16k", "caveat": "auto-interp label, may be unreliable", "tracked": null}
+    {"index": 1622, "label": "references to clinical dosage", "act": 7.4, "source": "17-gemmascope-2-res-16k", "caveat": "auto-interp label, may be unreliable", "tracked": null},
+    {"index": 8801, "label": "hedging / expressions of caution", "act": 5.1, "source": "17-gemmascope-2-res-16k", "caveat": "auto-interp label, may be unreliable", "tracked": "uncertainty"},
+    {"index": 4412, "label": "pregnancy and obstetric terms", "act": 4.8, "source": "17-gemmascope-2-res-16k", "caveat": "auto-interp label, may be unreliable", "tracked": null}
   ],
   "adjudication": {
     "verdict": "likely_hallucinated",
