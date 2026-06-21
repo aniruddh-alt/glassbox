@@ -1,10 +1,32 @@
 [project]
 name = "glassbox"
 version = "0.1.0"
-description = "Add your description here"
+description = "Cognition-observability for medical LLMs"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.138.0",
     "sentry-sdk[fastapi]>=2.63.0",
+    "httpx>=0.27.0",
 ]
+
+[project.optional-dependencies]
+# Real inference path. Installed only where weights/GPU exist:  uv sync --extra ml
+# Match the validated env in PLAN.md §1 (torch 2.12 / transformers 5.12 / sae-lens 6).
+ml = [
+    "torch>=2.4",
+    "transformers>=4.50",
+    "sae-lens>=6.0",
+    "scikit-learn>=1.5",
+    "accelerate>=0.34",
+    "anthropic>=0.40",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+addopts = "-q"
