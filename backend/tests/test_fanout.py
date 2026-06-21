@@ -38,3 +38,27 @@ def test_fanout_isolates_failing_sink(monkeypatch):
     monkeypatch.setattr(fo, "_SINKS", [Bad(), Good()])
     fo.fanout({"flag": False}, {"turn_ms": 1})   # must not raise; Good still runs
     assert calls == ["good"]
+
+
+def test_sentry_sink_quiet_on_unflagged_and_redacted_on_flag(monkeypatch):
+    import backend.fanout as fo
+    captured = {}
+    fake = type("S", (), {})()
+    fake.capture_message = lambda msg, level=None: captured.setdefault("msgs", []).append((msg, level))
+    class Scope:
+        def __enter__(s): return s
+        def __exit__(s, *a): return False
+        def set_tag(s, *a): pass
+        def set_context(s, k, v): captured["ctx"] = v
+        fingerprint = None
+    fake.new_scope = lambda: Scope()
+    monkeypatch.setitem(__import__("sys").modules, "sentry_sdk", fake)
+    monkeypatch.setattr(fo, "_sentry_on", True)
+    sink = fo.SentrySink()
+    ev = {"flag": False}; sink.emit(ev); assert "msgs" not in captured        # quiet
+    ev = {"flag": True, "severity": "warning", "model": "g", "uncertainty": 0.2,
+          "uncertainty_proj": 1.0, "trackers": {}, "io": {"user_msg": "SECRET", "response": "SECRET"},
+          "features": [{"label": "dosing"}]}
+    sink.emit(ev)
+    assert captured["msgs"][0][1] == "warning"
+    assert "SECRET" not in repr(captured["ctx"]) and captured["ctx"]["top_features"] == ["dosing"]
