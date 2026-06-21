@@ -1,19 +1,32 @@
 // Consume POST /api/chat as NDJSON via fetch + ReadableStream (NOT EventSource — GET-only,
 // and SSE-over-GET breaks through Cloudflare). Handles split-UTF8 chunk boundaries.
-// OWNER: Lane C. Build against fixtures/cognition_event.sample.json before the API is real.
+// OWNER: Lane C. Pass {mock:true} to replay fixtures/the demo event before the API is real.
 import { useState } from "react";
 
 import type { CognitionEvent, StreamLine } from "./types";
+import { DEMO_EVENT } from "./mock";
 
-export function useCognitionStream() {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export function useCognitionStream(opts?: { mock?: boolean }) {
   const [answer, setAnswer] = useState("");
   const [event, setEvent] = useState<CognitionEvent | null>(null);
   const [status, setStatus] = useState<"idle" | "streaming" | "done" | "error">("idle");
 
+  // Mock mode: replay the demo event token-by-token (post-hoc: tokens stream, then the event lands).
+  async function replayMock() {
+    setAnswer(""); setEvent(null); setStatus("streaming");
+    for (const tok of DEMO_EVENT.io.response.split(/(\s+)/)) {
+      setAnswer((a) => a + tok);
+      await sleep(26 + Math.random() * 40);
+    }
+    await sleep(500);
+    setEvent(DEMO_EVENT); setStatus("done");
+  }
+
   async function send(messages: { role: string; content: string }[], trackers?: string[]) {
-    setAnswer("");
-    setEvent(null);
-    setStatus("streaming");
+    if (opts?.mock) return replayMock();
+    setAnswer(""); setEvent(null); setStatus("streaming");
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -28,12 +41,12 @@ export function useCognitionStream() {
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         const lines = buf.split("\n");
-        buf = lines.pop() ?? ""; // keep partial line
+        buf = lines.pop() ?? "";
         for (const line of lines) {
           if (!line.trim()) continue;
           const msg = JSON.parse(line) as StreamLine;
           if (msg.type === "token") setAnswer((a) => a + msg.text);
-          else setEvent(msg); // the final {type:"event", ...CognitionEvent}
+          else setEvent(msg);
         }
       }
       setStatus("done");

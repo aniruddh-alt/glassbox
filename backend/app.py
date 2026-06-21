@@ -1,8 +1,5 @@
-"""FastAPI app — routes, CORS, startup model/SAE load, NDJSON streaming.
+"""FastAPI backend"""
 
-OWNER: Lane A. The /api/chat scaffold below streams the fixture so Lane C can build the
-full UI before real signals exist (build order H0-2). Swap to real generation in H2-5.
-"""
 from __future__ import annotations
 
 import json
@@ -20,22 +17,26 @@ app.add_middleware(
 )
 
 _FIXTURE = json.loads(
-    (pathlib.Path(__file__).parents[1] / "fixtures" / "cognition_event.sample.json").read_text()
+    (
+        pathlib.Path(__file__).parents[1] / "fixtures" / "cognition_event.sample.json"
+    ).read_text()
 )
 
 
 @app.on_event("startup")
-def _startup() -> None:
-    # TODO(Lane A): load model + SAE + built-in persona vectors once, keep warm.
-    # from .engine import load_engine; from .science import sae, persona
-    # app.state.engine = load_engine()
-    ...
+def _startup() -> None: ...
 
 
 @app.get("/api/health")
 def health() -> dict:
     # TODO(Lane A): report real load state.
-    return {"gpu": True, "model_loaded": False, "sae_loaded": False, "trackers": [], "mode": config.MODE}
+    return {
+        "gpu": True,
+        "model_loaded": False,
+        "sae_loaded": False,
+        "trackers": [],
+        "mode": config.MODE,
+    }
 
 
 @app.post("/api/chat")
@@ -45,10 +46,21 @@ async def chat(body: dict):
     Wire protocol (contract #2): zero+ {"type":"token",...} lines, then exactly one
     {"type":"event", ...CognitionEvent}. Replace with real generation in H2-5.
     """
+
     async def gen():
         answer = _FIXTURE["io"]["response"]
         for tok in answer.split(" "):
-            yield json.dumps({"type": "token", "text": tok + " ", "top_features": [], "uncertainty": None}) + "\n"
+            yield (
+                json.dumps(
+                    {
+                        "type": "token",
+                        "text": tok + " ",
+                        "top_features": [],
+                        "uncertainty": None,
+                    }
+                )
+                + "\n"
+            )
         yield json.dumps(_FIXTURE) + "\n"
 
     # TODO(Lane A): real path — engine.generate() → hook captures layer-12 act →
@@ -81,5 +93,9 @@ async def track_status(tracker_id: str):
 async def feature(index: int):
     """Server-side Neuronpedia label proxy/cache (dodges client CORS + rate limits)."""
     # TODO(Lane A): from .labels import get_label
-    return {"index": index, "label": "(unfetched)", "source": config.NP_SOURCE,
-            "caveat": "auto-interp label, may be unreliable"}
+    return {
+        "index": index,
+        "label": "(unfetched)",
+        "source": config.NP_SOURCE,
+        "caveat": "auto-interp label, may be unreliable",
+    }

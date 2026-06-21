@@ -1,24 +1,24 @@
 """Constants + env loading. The layer/SAE choices are LOCKED (see README model decision)."""
+
 from __future__ import annotations
 
 import os
 
-# --- Model + SAE (LOCKED) ---
-MODEL_ID = os.getenv("MODEL_ID", "google/gemma-2-2b-it")  # or unsloth/gemma-2-2b-it (ungated)
-LAYER = 12                                                # residual-stream layer for BOTH families
-SAE_RELEASE = "gemma-scope-2b-pt-res-canonical"
-SAE_ID = f"layer_{LAYER}/width_16k/canonical"             # d_in=2304 -> d_sae=16384, L0~100
-D_IN = 2304
+MODEL_ID = os.getenv("MODEL_ID", "unsloth/gemma-3-4b-it")
+LAYER = int(os.getenv("LAYER", "17"))
+SAE_LAYERS = [9, 17, 22, 29]
+SAE_RELEASE = "gemma-scope-2-4b-it-res"
+SAE_ID = os.getenv("SAE_ID", f"layer_{LAYER}_width_16k_l0_medium")
+D_IN = 2560
 D_SAE = 16384
 
-# --- Neuronpedia label lookup (keyless GET) ---
-NP_MODEL = "gemma-2-2b"
-NP_SOURCE = f"{LAYER}-gemmascope-res-16k"
+NP_MODEL = "gemma-3-4b"
+NP_SOURCE = f"{LAYER}-gemmascope-2-res-16k"
 NP_FEATURE_URL = "https://www.neuronpedia.org/api/feature/{model}/{source}/{index}"
 
 # --- Family A (SAE cloud) ---
-TOPK = 15            # top features per token
-TOPK_EVENT = 30      # union cap across tokens in the final event
+TOPK = 15  # top features per token
+TOPK_EVENT = 30  # union cap across tokens in the final event
 
 # --- Family B (probes) ---
 BUILTIN_TRACKERS = ["uncertainty", "harmful", "hallucination"]
@@ -32,5 +32,22 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 PHOENIX_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006")
 
-# Special tokens to mask in the SAE cloud (high-norm noise on chat-template control tokens).
 MASK_TOKENS = ["<bos>", "<start_of_turn>", "<end_of_turn>"]
+
+
+def resolve_device(pref: str | None = None) -> str:
+    """Resolve the runtime device."""
+    import torch
+
+    p = (pref or DEVICE or "auto").lower()
+    if p == "cuda" and torch.cuda.is_available():
+        return "cuda"
+    if p == "mps" and torch.backends.mps.is_available():
+        return "mps"
+    if p == "cpu":
+        return "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"

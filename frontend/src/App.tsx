@@ -1,29 +1,56 @@
-// Root view. OWNER: Lane C.
-// ClinicianView (demo hero): ChatPanel + UncertaintyMeter (green→red confident-wrong zone)
-//   + FeatureCloud (react-force-graph-2d, top-k, "unverified" badges, k-slider) + TrackedConcepts.
-// ObservabilityView: NOT a custom dashboard — linkout/iframe cards to the live Sentry project
-//   and Phoenix (localhost:6006). Sells two sponsors in one click.
+// Root view — the ClinicianView demo hero. OWNER: Lane C.
+// Chat (left) | cognition stage (right): the SAE feature field + probe panel + the Claude verdict.
+// Built against the demo event (mock:true). Flip mock:false once /api/chat streams real NDJSON.
+import { useEffect, useMemo, useState } from "react";
+
+import "./styles.css";
 import { useCognitionStream } from "./useCognitionStream";
+import { DEMO_EVENT } from "./mock";
+import { ChatPanel } from "./components/ChatPanel";
+import { FeatureField } from "./components/FeatureField";
+import { ProbePanel } from "./components/ProbePanel";
+import { AdjudicationBanner } from "./components/AdjudicationBanner";
 
 export function App() {
-  const { answer, event, status, send } = useCognitionStream();
+  const { answer, event, status, send } = useCognitionStream({ mock: true });
+  const [hasRun, setHasRun] = useState(false);
 
-  // TODO(Lane C): build ClinicianView + ObservabilityView with a ViewToggle.
-  // Build everything against fixtures/cognition_event.sample.json first.
+  // auto-run once on load so the page shows the full arc immediately
+  useEffect(() => {
+    const id = setTimeout(() => send([{ role: "user", content: DEMO_EVENT.io.user_msg }]), 400);
+    return () => clearTimeout(id);
+  }, []);
+  useEffect(() => { if (status === "done") setHasRun(true); }, [status]);
+
+  // stable identity when empty so the canvas effect doesn't rebuild on every streamed token
+  const features = useMemo(() => event?.features ?? [], [event]);
+  const trackers = useMemo(() => event?.trackers ?? {}, [event]);
+
   return (
-    <div style={{ fontFamily: "system-ui", maxWidth: 900, margin: "40px auto", padding: 20 }}>
-      <h1>GlassBox</h1>
-      <p style={{ color: "#667" }}>Cognition-observability for medical LLMs — scaffold.</p>
-      <button onClick={() => send([{ role: "user", content: "Is metformin safe in pregnancy?" }])}>
-        Send test message
-      </button>
-      <p>status: {status}</p>
-      <pre style={{ whiteSpace: "pre-wrap" }}>{answer}</pre>
-      {event && (
-        <pre style={{ background: "#0a0e16", color: "#9fd0ff", padding: 12, overflowX: "auto" }}>
-          {JSON.stringify(event, null, 2)}
-        </pre>
-      )}
+    <div className="app">
+      <header className="glass">
+        <div className="mark"><span className="lens" /><span className="g">glass</span><b>box</b></div>
+        <div className="meta"><span className="pill">gemma-2-2b-it · L12</span></div>
+        <div className="live"><span className="d" />observing</div>
+      </header>
+
+      <main>
+        <ChatPanel
+          userMsg={DEMO_EVENT.io.user_msg}
+          answer={answer}
+          status={status}
+          hasRun={hasRun}
+          onRun={(content) => send([{ role: "user", content }])}
+        />
+        <section className="stage">
+          <FeatureField features={features} />
+          <ProbePanel trackers={trackers} />
+          <AdjudicationBanner adjudication={event?.adjudication ?? null} />
+          <p className="ethos">
+            <b>Surface, never suppress</b> — we flag when to double-check, never alter the answer.
+          </p>
+        </section>
+      </main>
     </div>
   );
 }

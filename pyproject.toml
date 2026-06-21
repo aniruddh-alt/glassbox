@@ -1,0 +1,10 @@
+[project]
+name = "glassbox"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.138.0",
+    "sentry-sdk[fastapi]>=2.63.0",
+]
