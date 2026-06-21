@@ -32,7 +32,7 @@ export function App() {
       setThread((t) => (t.length && t[t.length - 1].role === "user"
         ? [...t, { role: "assistant", content: "[generation failed]" }] : t));
     }
-  }, [status]);
+  }, [status, answer, event]);
 
   const features = useMemo(() => latest?.features ?? [], [latest]);
   const trackers = useMemo(() => latest?.trackers ?? {}, [latest]);
