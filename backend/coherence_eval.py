@@ -52,31 +52,35 @@ def _run(limit: int) -> dict:
     client = Client(base_url=config.PHOENIX_ENDPOINT)
 
     df = client.spans.get_spans_dataframe(
-        query=(
-            SpanQuery()
-            .where("span_kind == 'LLM'")
-            .select("attributes.cognition.feature_labels")
-        ),
+        # NO .select(): the Phoenix select DSL nulls nested attributes. Pulling the full row returns
+        # `context.span_id` as a real column AND the cognition attrs as a dict column.
+        query=SpanQuery().where("span_kind == 'LLM'"),
         project_identifier="glassbox",
         limit=limit,
     )
 
-    if df is None or df.empty:
+    if df is None or df.empty or "attributes.cognition" not in df.columns:
         return {"evaluated": 0, "off_domain": 0}
 
-    # Skip spans that already have a feature_coherence annotation.
+    # `attributes.cognition` is a dict per span, e.g. {"feature_labels": "<json>", "flag": ...}.
+    df = df.copy()
+    df["feature_labels"] = df["attributes.cognition"].apply(
+        lambda c: c.get("feature_labels") if isinstance(c, dict) else None
+    )
+    df = df[df["feature_labels"].notna()]
+
+    # Skip spans that already have a feature_coherence annotation (no-op today — the annotation
+    # isn't pulled by this query, so re-runs re-evaluate; documented limitation).
     if "feature_coherence_label" in df.columns:
         df = df[df["feature_coherence_label"].isna()]
 
     if df.empty:
         return {"evaluated": 0, "off_domain": 0}
 
-    # Derive the two inputs the evaluator needs from the span attribute.
-    df = df.copy()
-    df["feature_labels"] = df["attributes.cognition.feature_labels"]
     df["domain_context"] = MEDICAL_DOMAIN_CONTEXT
 
     # HARD-RESTRICT: only these three columns reach the cloud LLM — §6 privacy invariant.
+    # context.span_id is already a real column here (also the index) — no reset_index needed.
     df = df[["context.span_id", "feature_labels", "domain_context"]]
 
     llm = LLM(provider=config.EVAL_LLM_PROVIDER, model=config.EVAL_LLM_MODEL)
