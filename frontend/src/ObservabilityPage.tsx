@@ -8,6 +8,23 @@ import { useObservability } from "./useObservability";
 import { DEMO_OBSERVABILITY_SNAPSHOT } from "./mock";
 import { runEval } from "./api";
 
+// ── Formatting helpers ────────────────────────────────────────────────────────
+
+// Latency arrives as floats off the wire (e.g. 15929.5961…); show whole ms, grouped.
+function fmtMs(ms: number | null): string {
+  return ms == null ? "—" : `${Math.round(ms).toLocaleString()}ms`;
+}
+
+// Message ids can be 32-char hashes — clip so they don't dominate the row.
+function shortId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 8)}…` : id;
+}
+
+// Stage keys are snake_case engineering names; read better with spaces.
+function humanize(s: string): string {
+  return s.replace(/_/g, " ");
+}
+
 // ── Sparkline (SVG polyline over a series of [0,1]-ish values) ────────────────
 
 function Sparkline({ series, width = 96, height = 32 }: { series: number[]; width?: number; height?: number }) {
@@ -104,10 +121,10 @@ function ConfidentWrongFeed({ items }: { items: ObsConfidentWrong[] }) {
           return (
             <div key={item.message_id} className="obs-cw-item">
               <div className="obs-cw-meta">
-                <span className="obs-cw-id">{item.message_id}</span>
-                <span className="obs-cw-unc">
-                  {item.uncertainty != null ? `unc ${item.uncertainty.toFixed(2)}` : ""}
-                </span>
+                {item.uncertainty != null && (
+                  <span className="obs-cw-unc">unc {item.uncertainty.toFixed(2)}</span>
+                )}
+                <span className="obs-cw-id" title={item.message_id}>{shortId(item.message_id)}</span>
                 <span className="obs-cw-ts">{new Date(item.ts * 1000).toLocaleTimeString()}</span>
               </div>
               {trackerEntries.length > 0 && (
@@ -154,17 +171,19 @@ function FeatureLeaderboard({ snapshot }: { snapshot: ObservabilitySnapshot }) {
       <div className="obs-leaderboard">
         {features.map((f) => (
           <div key={f.label} className="obs-lb-row">
-            <span className="obs-lb-label">{f.label}</span>
+            <span className="obs-lb-label" title={f.label}>{f.label}</span>
+            <span className="obs-lb-meta">
+              <span className="obs-lb-count">{f.count}</span>
+              {f.mean_act != null && (
+                <span className="obs-lb-act">{f.mean_act.toFixed(2)}</span>
+              )}
+            </span>
             <div className="obs-lb-bar-wrap">
               <div
                 className="obs-lb-bar"
                 style={{ width: `${(f.count / maxCount) * 100}%` }}
               />
             </div>
-            <span className="obs-lb-count">{f.count}</span>
-            {f.mean_act != null && (
-              <span className="obs-lb-act">{f.mean_act.toFixed(2)}</span>
-            )}
           </div>
         ))}
       </div>
@@ -182,7 +201,7 @@ function LatencyBar({ label, ms, maxMs }: { label: string; ms: number | null; ma
       <div className="obs-lat-bar-wrap">
         <div className="obs-lat-bar" style={{ width: `${pct}%` }} />
       </div>
-      <span className="obs-lat-val">{ms != null ? `${ms}ms` : "—"}</span>
+      <span className="obs-lat-val">{fmtMs(ms)}</span>
     </div>
   );
 }
@@ -230,15 +249,15 @@ function LatencyHealth({
           {health.mode === "real" ? "live model" : health.mode === "fallback" ? "synthetic · offline" : "warming up"}
         </span>
         <span className="right">
-          p50 <b>{latency.turn_ms.p50 != null ? `${latency.turn_ms.p50}ms` : "—"}</b>
+          p50 <b>{fmtMs(latency.turn_ms.p50)}</b>
           {" "}&middot;{" "}
-          p95 <b>{latency.turn_ms.p95 != null ? `${latency.turn_ms.p95}ms` : "—"}</b>
+          p95 <b>{fmtMs(latency.turn_ms.p95)}</b>
         </span>
       </div>
       <div className="obs-lat-list">
         {stageOrder.map((s) =>
           latency.stages[s] ? (
-            <LatencyBar key={s} label={s} ms={latency.stages[s].p50} maxMs={maxStageMs} />
+            <LatencyBar key={s} label={humanize(s)} ms={latency.stages[s].p50} maxMs={maxStageMs} />
           ) : null
         )}
       </div>
@@ -327,6 +346,49 @@ function SentryStrip({ snapshot }: { snapshot: ObservabilitySnapshot }) {
   );
 }
 
+// ── KpiStrip ─────────────────────────────────────────────────────────────────
+// Headline numbers lifted out of the panels so the state of the system reads at a glance.
+
+type Kpi = { label: string; value: string; unit?: string; tone?: "accent" | "ok" };
+
+function KpiStrip({ snapshot }: { snapshot: ObservabilitySnapshot }) {
+  const { totals, flag_rate, trackers, latency, health } = snapshot;
+  const kpis: Kpi[] = [
+    { label: "Turns", value: `${totals.turns}` },
+    {
+      label: "Flag rate",
+      value: `${(flag_rate * 100).toFixed(0)}`,
+      unit: "%",
+      tone: flag_rate >= 0.5 ? "accent" : undefined,
+    },
+    { label: "Flags", value: `${totals.flags}`, tone: totals.flags > 0 ? "accent" : undefined },
+    { label: "Probes", value: `${Object.keys(trackers).length}` },
+    {
+      label: "p50 latency",
+      value: latency.turn_ms.p50 != null ? Math.round(latency.turn_ms.p50).toLocaleString() : "—",
+      unit: latency.turn_ms.p50 != null ? "ms" : undefined,
+    },
+    {
+      label: "SAE recon",
+      value: health.sae_recon_cosine != null ? health.sae_recon_cosine.toFixed(3) : "—",
+      tone: health.sae_recon_cosine == null ? undefined : health.sae_recon_ok ? "ok" : "accent",
+    },
+  ];
+  return (
+    <div className="obs-kpis">
+      {kpis.map((k) => (
+        <div key={k.label} className="obs-kpi">
+          <span className="obs-kpi-val" data-tone={k.tone}>
+            {k.value}
+            {k.unit && <i className="obs-kpi-unit">{k.unit}</i>}
+          </span>
+          <span className="obs-kpi-label">{k.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── ObservabilityPage ────────────────────────────────────────────────────────
 
 export function ObservabilityPage() {
@@ -356,23 +418,34 @@ export function ObservabilityPage() {
 
   return (
     <div className="obs-page">
-      <div className="obs-status-bar">
-        {status === "loading" && <span className="obs-status-note">Connecting to backend&hellip;</span>}
+      <div className="obs-head">
+        <h1>Observability</h1>
+        {status === "loading" && <span className="obs-head-status">Connecting to backend&hellip;</span>}
         {status === "error" && (
-          <span className="obs-status-note obs-status-error">Backend unreachable — showing demo data.</span>
+          <span className="obs-head-status err">Backend unreachable — showing demo data.</span>
         )}
         {status === "ok" && liveSnapshot && (
-          <span className="obs-status-note obs-status-ok">
+          <span className="obs-head-status ok">
             Live &mdash; {liveSnapshot.totals.turns} turns, {(liveSnapshot.flag_rate * 100).toFixed(0)}% flagged
           </span>
+        )}
+        {!liveSnapshot && status !== "loading" && status !== "error" && (
+          <span className="obs-head-status">Demo data</span>
         )}
         {evalResult && <span className="obs-eval-result">{evalResult}</span>}
       </div>
 
-      <TrackerStrip snapshot={snapshot} />
-      <ConfidentWrongFeed items={snapshot.confident_wrong} />
-      <FeatureLeaderboard snapshot={snapshot} />
-      <LatencyHealth snapshot={snapshot} onEval={handleEval} evalRunning={evalRunning} />
+      <KpiStrip snapshot={snapshot} />
+
+      {/* Pair the two short panels on the top row and the two tall ones below,
+          so neither column ends in a ragged gap. */}
+      <div className="obs-grid">
+        <TrackerStrip snapshot={snapshot} />
+        <LatencyHealth snapshot={snapshot} onEval={handleEval} evalRunning={evalRunning} />
+        <ConfidentWrongFeed items={snapshot.confident_wrong} />
+        <FeatureLeaderboard snapshot={snapshot} />
+      </div>
+
       <PhoenixEmbed url={snapshot.phoenix_ui_url} />
       <SentryStrip snapshot={snapshot} />
     </div>
