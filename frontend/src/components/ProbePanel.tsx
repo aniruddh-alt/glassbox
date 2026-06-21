@@ -48,6 +48,7 @@ export function ProbePanel({ trackers }: { trackers: Record<string, Tracker> }) 
     name, score: t.score, flag: t.flag, thr: PROBE_META[name]?.thr ?? 0.5,
     auroc: PROBE_META[name]?.auroc, userDefined: t.user_defined,
   }));
+  const noBuiltins = builtins.length === 0;
 
   function define() {
     const concept = (draft.trim() || "over-confidence"); setDraft("");
@@ -67,8 +68,15 @@ export function ProbePanel({ trackers }: { trackers: Record<string, Tracker> }) 
         <span className="sub">calibrated</span>
         <span className="right coral">coral · over threshold</span>
       </div>
+      {noBuiltins && custom.length === 0 && (
+        <div className="wip">
+          <b>Family B — calibrated uncertainty / safety probes</b>
+          <span>In progress. Once probes are trained, the live meter (green → red) appears here per message.</span>
+        </div>
+      )}
       {[...builtins, ...custom].map((row, i) => <ProbeRow key={row.id ?? `b${i}`} row={row} />)}
-      <div className="define">
+      <div className="define preview">
+        <span className="tag">preview</span>
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
