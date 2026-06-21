@@ -1,5 +1,5 @@
 # backend/tests/test_observability.py
-from backend.observability import to_redacted_view
+from backend.observability import to_redacted_view, ObservabilityStore
 
 SECRET_Q, SECRET_A = "PATIENT_PROMPT_42yo_warfarin", "RESPONSE_take_5mg"
 
@@ -27,3 +27,30 @@ def test_redacted_view_omits_prompt_response_and_rationale():
 def test_redacted_view_handles_no_adjudication_and_empty_trackers():
     v = to_redacted_view(_event(adjudication=None, trackers={}, features=[]))
     assert v["adjudication"] is None and v["trackers"] == {} and v["features"] == []
+
+def test_store_rejects_raw_event_and_snapshot_aggregates():
+    s = ObservabilityStore(maxlen=5)
+    raw = {"io": {"user_msg": "x"}, "message_id": "m", "ts": 1.0}
+    try:
+        s.record(raw, None); assert False, "should reject un-redacted view"
+    except AssertionError as e:
+        assert "redacted" in str(e)
+    # well-formed redacted views
+    for i in range(3):
+        v = to_redacted_view({"message_id": f"m{i}", "ts": float(i), "model": "g", "layer": 17,
+                              "uncertainty": 0.1 * i, "flag": i == 2, "severity": "warning",
+                              "trackers": {"uncertainty": {"score": 0.1 * i, "flag": i == 2}},
+                              "features": [{"index": 1, "label": "dosing", "act": 1.0}]})
+        s.record(v, {"turn_ms": 100 + i, "stages": {"pod_roundtrip": 50}})
+    snap = s.snapshot()
+    assert snap["totals"]["turns"] == 3
+    assert len(snap["uncertainty_series"]) == 3
+    assert abs(snap["flag_rate"] - 1/3) < 1e-9
+    assert snap["trackers"]["uncertainty"]["series"] == [0.0, 0.1, 0.2]
+    assert snap["top_features"][0]["label"] == "dosing" and snap["top_features"][0]["count"] == 3
+    assert snap["latency"]["turn_ms"]["last"] == 102
+    assert len(snap["confident_wrong"]) == 1 and snap["confident_wrong"][0]["message_id"] == "m2"
+
+def test_store_empty_snapshot_is_well_formed():
+    snap = ObservabilityStore().snapshot()
+    assert snap["totals"]["turns"] == 0 and snap["trackers"] == {} and snap["confident_wrong"] == []
