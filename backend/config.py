@@ -79,7 +79,7 @@ AUTOINTERP_MODEL = os.getenv("AUTOINTERP_MODEL", "claude-haiku-4-5")  # cheap, o
 STRUCTURAL_PENALTY = float(os.getenv("STRUCTURAL_PENALTY", "0.15"))
 
 # --- Family B (probes) ---
-BUILTIN_TRACKERS = ["uncertainty", "harmful", "hallucination"]
+BUILTIN_TRACKERS = ["uncertainty", "harmful", "hallucination", "risk_awareness"]
 # Thresholds are calibrated offline (validation/) and loaded from science/vectors/thresholds.json.
 DEFAULT_THRESHOLD = 0.5
 
@@ -116,6 +116,16 @@ DEVICE = os.getenv("DEVICE", "cuda")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 PHOENIX_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006")
+
+# --- Observability surfaces (read paths + eval) ---
+PHOENIX_UI_URL      = os.getenv("PHOENIX_UI_URL", PHOENIX_ENDPOINT)        # iframe src
+SENTRY_ORG_SLUG     = os.getenv("SENTRY_ORG_SLUG", "")
+SENTRY_PROJECT_SLUG = os.getenv("SENTRY_PROJECT_SLUG", "")
+SENTRY_AUTH_TOKEN   = os.getenv("SENTRY_AUTH_TOKEN", "")                    # internal-integration, event:read+project:read
+SENTRY_API_BASE     = os.getenv("SENTRY_API_BASE", "https://sentry.io").rstrip("/")
+SENTRY_ORG_URL      = os.getenv("SENTRY_ORG_URL", "https://sentry.io")     # deep-link host
+EVAL_LLM_PROVIDER   = os.getenv("EVAL_LLM_PROVIDER", "anthropic")
+EVAL_LLM_MODEL      = os.getenv("EVAL_LLM_MODEL", "claude-haiku-4-5-20251001")
 
 MASK_TOKENS = ["<bos>", "<start_of_turn>", "<end_of_turn>"]
 
