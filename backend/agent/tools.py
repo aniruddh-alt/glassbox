@@ -25,6 +25,11 @@ def dispatch(name: str, tool_input: dict, ctx: dict) -> str:
     tid = ctx["tracker_id"]
     if name == "submit_spec":
         ctx["spec"] = tool_input
+        import os
+
+        cap = int(os.getenv("AGENT_MAX_QUESTIONS", "0"))
+        if cap:
+            ctx["spec"]["questions"] = ctx["spec"]["questions"][:cap]
         cs.update_job(tid, status="designing", trait_name=tool_input["trait_name"],
                       progress={"step": "spec", "pct": 20})
         return f"Spec stored: {len(tool_input['questions'])} questions. Call generate_contrastive."
