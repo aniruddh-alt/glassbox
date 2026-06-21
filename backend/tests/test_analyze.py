@@ -103,3 +103,18 @@ def test_analyze_turn_returns_perf(monkeypatch):
     assert perf["pod_stages"].get("capture") == 10.0
     assert perf["pod_stages"].get("sae") == 5.0
     assert perf["pod_stages"].get("trackers") == 2.0
+
+
+def test_pod_failure_reports_instrument_unhealthy(monkeypatch):
+    """Regression (final-review Important #2): a pod failure must wire the instrument_unhealthy
+    concern to Sentry via fanout.report_error('pod-down', exc)."""
+    from backend import runtime
+    import backend.pod_client as pc
+    import backend.fanout as fo
+    calls = []
+    monkeypatch.setattr(fo, "report_error", lambda stage, exc, ctx=None: calls.append(stage))
+    monkeypatch.setattr(analyze.runtime, "refresh_pod_health", lambda: None)
+    runtime.STATE.update(mode="real", model_loaded=True, sae_loaded=True)
+    monkeypatch.setattr(pc, "turn", lambda *a, **k: (_ for _ in ()).throw(pc.PodError(0, "turn")))
+    analyze.analyze_turn([{"role": "user", "content": "x"}])
+    assert "pod-down" in calls

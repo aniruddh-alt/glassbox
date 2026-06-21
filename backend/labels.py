@@ -81,7 +81,9 @@ def get_feature_stats(index: int, timeout: float = 6.0) -> dict:
             max_act = d.get("maxActApprox")
             density = d.get("frac_nonzero")
             activations = d.get("activations")
-    except Exception:
+    except Exception as e:
+        from . import fanout
+        fanout.report_error("label-fetch", e, {"feature_index": index})  # instrument_unhealthy → Sentry
         pass
 
     is_structural = False
@@ -192,7 +194,9 @@ def _autointerp(activations) -> dict | None:
                 lbl = (block.input.get("label") or "").strip().rstrip(".")
                 if lbl:
                     return {"label": lbl, "is_structural": bool(block.input.get("is_structural"))}
-    except Exception:
+    except Exception as e:
+        from . import fanout
+        fanout.report_error("autointerp", e)  # instrument_unhealthy → Sentry (no PII: sends global-corpus excerpts only)
         return None
     return None
 

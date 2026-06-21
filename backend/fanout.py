@@ -95,8 +95,7 @@ def _scrub_pii(event: dict, hint: dict):
                 else: walk(o[k])
         elif isinstance(o, list):
             for x in o: walk(x)
-    for sect in ("contexts", "extra", "request"):
-        if sect in event: walk(event[sect])
+    walk(event)  # whole event (message/logentry/breadcrumbs/contexts/extra/request/threads) — "anywhere"
     return event
 
 

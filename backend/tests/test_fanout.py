@@ -105,3 +105,18 @@ def test_sentry_sink_quiet_on_unflagged_and_redacted_on_flag(monkeypatch):
     sink.emit(ev)
     assert captured["msgs"][0][1] == "warning"
     assert "SECRET" not in repr(captured["ctx"]) and captured["ctx"]["top_features"] == ["dosing"]
+
+
+def test_scrub_pii_walks_whole_event_not_just_three_sections():
+    """Regression (final-review Important #1): _scrub_pii must scrub forbidden keys ANYWHERE
+    in the event (breadcrumbs/threads/logentry), not only contexts/extra/request."""
+    from backend.fanout import _scrub_pii
+    ev = {
+        "message": "Confident-wrong medical answer",  # key 'message' is NOT a PII key -> preserved
+        "breadcrumbs": {"values": [{"data": {"messages": "PATIENT_SECRET_Q"}}]},
+        "threads": {"values": [{"stacktrace": {"frames": [{"vars": {"response": "ANSWER_SECRET"}}]}}]},
+    }
+    out = _scrub_pii(ev, {})
+    blob = repr(out)
+    assert "PATIENT_SECRET_Q" not in blob and "ANSWER_SECRET" not in blob
+    assert out["message"] == "Confident-wrong medical answer"

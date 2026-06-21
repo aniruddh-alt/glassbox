@@ -154,6 +154,8 @@ def analyze_turn(
             answer, feats, trackers, timing_data = _real_turn(messages)
         except Exception as e:
             runtime.refresh_pod_health()
+            from . import fanout
+            fanout.report_error("pod-down", e)  # instrument_unhealthy concern → Sentry (sanitized)
             if strict:
                 raise RuntimeError(f"pod turn failed (strict mode, no fallback): {e}") from e
             print(f"[analyze] pod turn failed ({e}); synthetic fallback for this turn")
