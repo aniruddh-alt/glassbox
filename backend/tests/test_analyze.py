@@ -62,7 +62,7 @@ def test_real_turn_degrades_on_pod_failure(monkeypatch):
     runtime.STATE.update(mode="real", model_loaded=True, sae_loaded=True)
     import backend.pod_client as pc
 
-    monkeypatch.setattr(pc, "turn", lambda *a, **k: (_ for _ in ()).throw(pc.PodError("down")))
+    monkeypatch.setattr(pc, "turn", lambda *a, **k: (_ for _ in ()).throw(pc.PodError(0, "turn")))
     monkeypatch.setattr(analyze.runtime, "refresh_pod_health", lambda: None)
     answer, event, perf = analyze.analyze_turn([{"role": "user", "content": "Is ibuprofen safe?"}])
     assert isinstance(answer, str) and answer.strip()
