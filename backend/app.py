@@ -54,7 +54,10 @@ async def chat(body: dict):
             ) + "\n"
             await asyncio.sleep(_TOKEN_CADENCE_S)
         yield json.dumps(payload) + "\n"
-        fanout(payload)
+        try:
+            fanout(payload)
+        except Exception as e:  # never let a sponsor error break the completed stream
+            print(f"[app] fanout failed: {e}")
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
