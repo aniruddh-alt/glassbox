@@ -40,6 +40,32 @@ def test_fanout_isolates_failing_sink(monkeypatch):
     assert calls == ["good"]
 
 
+def test_phoenix_sink_redacts_and_builds_waterfall(monkeypatch):
+    import backend.fanout as fo
+    spans = []
+    class FakeSpan:
+        def __init__(s, name): s.name = name; s.attrs = {}; s.ended = None
+        def set_attribute(s, k, v): s.attrs[k] = v
+        def end(s, end_time=None): s.ended = end_time
+    class FakeTracer:
+        def start_span(s, name, context=None, start_time=None, openinference_span_kind=None):
+            assert openinference_span_kind == openinference_span_kind.lower()  # lowercase contract
+            sp = FakeSpan(name); sp.start = start_time; sp.kind = openinference_span_kind; spans.append(sp); return sp
+    monkeypatch.setattr(fo, "_tracer", FakeTracer())
+    monkeypatch.setattr(fo, "set_span_in_context", lambda sp: None, raising=False)
+    ev = {"flag": True, "model": "g", "uncertainty": 0.2, "trackers": {"unc": {"score": 0.2}},
+          "features": [{"label": "dosing"}], "io": {"user_msg": "SECRET", "response": "SECRET"}}
+    perf = {"t0_ns": 1_000_000_000, "turn_ms": 100,
+            "stages": {"pod_roundtrip": 60, "label_fetch": 10, "ranking": 5},
+            "pod_stages": {"capture": 40, "sae": 15, "trackers": 3}}
+    fo.PhoenixSink().emit(ev, perf)
+    all_attrs = {k: v for sp in spans for k, v in sp.attrs.items()}
+    assert "input.value" not in all_attrs and "output.value" not in all_attrs
+    assert "SECRET" not in repr(all_attrs)
+    assert spans[0].name == "chat-turn" and any(sp.name == "pod_roundtrip" for sp in spans)
+    assert all_attrs["cognition.feature_labels"] == '["dosing"]'
+
+
 def test_sentry_sink_quiet_on_unflagged_and_redacted_on_flag(monkeypatch):
     import backend.fanout as fo
     captured = {}
