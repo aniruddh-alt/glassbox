@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 SCHEMA_VERSION = "1.0"
 
 Severity = Literal["info", "warning"]
+AlertDirection = Literal["high", "low"]
 
 
 class IO(BaseModel):
@@ -26,6 +27,7 @@ class Tracker(BaseModel):
     flag: bool = Field(..., description="score >= calibrated threshold")
     reliable: bool = Field(True, description="Family B (probe) = reliable; never set for SAE labels")
     proj_pre: float | None = Field(None, description="last-prompt-token projection (pre-gen early warning)")
+    alert_direction: AlertDirection = Field("high", description="'high' flags at/above threshold; 'low' flags at/below threshold")
     user_defined: bool = False
     status: Literal["computing", "ready"] = "ready"
 

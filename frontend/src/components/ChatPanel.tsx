@@ -1,7 +1,89 @@
 // Clinician chat: a multi-turn thread + the streaming assistant turn + the composer.
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 
 export type Msg = { role: "user" | "assistant"; content: string };
+
+function inlineMarkdown(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  const re = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const token = m[0];
+    const body = token.startsWith("**")
+      ? token.slice(2, -2)
+      : token.startsWith("*")
+        ? token.slice(1, -1)
+        : token.slice(1, -1);
+    if (token.startsWith("**")) out.push(<strong key={m.index}>{body}</strong>);
+    else if (token.startsWith("*")) out.push(<em key={m.index}>{body}</em>);
+    else out.push(<code key={m.index}>{body}</code>);
+    last = m.index + token.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+function MarkdownText({ text }: { text: string }) {
+  const blocks: ReactNode[] = [];
+  const lines = text.split(/\r?\n/);
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) {
+      i += 1;
+      continue;
+    }
+    if (line.startsWith("```")) {
+      const code: string[] = [];
+      i += 1;
+      while (i < lines.length && !lines[i].startsWith("```")) {
+        code.push(lines[i]);
+        i += 1;
+      }
+      i += lines[i]?.startsWith("```") ? 1 : 0;
+      blocks.push(<pre key={i}><code>{code.join("\n")}</code></pre>);
+      continue;
+    }
+    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+    if (heading) {
+      const Tag = (`h${Math.min(heading[1].length + 2, 5)}`) as keyof JSX.IntrinsicElements;
+      blocks.push(<Tag key={i}>{inlineMarkdown(heading[2])}</Tag>);
+      i += 1;
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items: ReactNode[] = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        items.push(<li key={i}>{inlineMarkdown(lines[i].replace(/^\s*[-*]\s+/, ""))}</li>);
+        i += 1;
+      }
+      blocks.push(<ul key={i}>{items}</ul>);
+      continue;
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items: ReactNode[] = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(<li key={i}>{inlineMarkdown(lines[i].replace(/^\s*\d+\.\s+/, ""))}</li>);
+        i += 1;
+      }
+      blocks.push(<ol key={i}>{items}</ol>);
+      continue;
+    }
+
+    const para: string[] = [line];
+    i += 1;
+    while (i < lines.length && lines[i].trim() && !/^(```|#{1,3}\s+|\s*[-*]\s+|\s*\d+\.\s+)/.test(lines[i])) {
+      para.push(lines[i]);
+      i += 1;
+    }
+    blocks.push(<p key={i}>{inlineMarkdown(para.join(" "))}</p>);
+  }
+
+  return <>{blocks.map((block, idx) => <Fragment key={idx}>{block}</Fragment>)}</>;
+}
 
 export function ChatPanel({
   thread, pending, status, modelName, onSend,
@@ -47,13 +129,13 @@ export function ChatPanel({
         {thread.map((m, i) => (
           <div key={i} className={`msg ${m.role === "user" ? "user" : "bot"}`}>
             <span className="who">{who(m.role)}</span>
-            <div className="body">{m.content}</div>
+            <div className="body">{m.role === "assistant" ? <MarkdownText text={m.content} /> : m.content}</div>
           </div>
         ))}
         {streaming && (
           <div className="msg bot">
             <span className="who">{modelName}</span>
-            <div className="body">{pending}<span className="cursor" /></div>
+            <div className="body"><MarkdownText text={pending ?? ""} /><span className="cursor" /></div>
           </div>
         )}
       </div>

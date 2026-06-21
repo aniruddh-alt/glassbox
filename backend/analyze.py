@@ -25,9 +25,10 @@ _SYNTACTIC_MARKERS = (
     "punctuation", "capitaliz", "syntactic", "grammar", "forms of", "the word ", "word pairs",
     "phrase", "it's ", "this/that", "this isn't", "for purposes", "general purpose",
     "sequence progression", "subsequent word", "subsequent action", "it depends",
+    "okay", "greeting", "acknowledgment", "transition to task",
     # formatting / structural markers (also catch auto-interp labels for unlabelled features)
     "newline", "line break", "paragraph", "whitespace", "formatting", "markdown",
-    "bullet", "list marker", "list item", "section break", "heading", "discourse",
+    "bullet", "list", "code snippet", "section break", "heading", "discourse",
     "token fragment", "word fragment", "subword", "morpholog", "plural", "start of",
     "end of sentence", "sentence boundary", "function word",
 )
@@ -68,6 +69,9 @@ def _rank_features(candidates: list[dict]) -> list[dict]:
             "tracked": None,
         }
 
+    def _unlabeled(feat: dict) -> bool:
+        return feat["label"] == f"feature {feat['index']}"
+
     # Attribution path: candidates carry `attr` = causal effect on the response (act × grad·decoder).
     # Attach labels (auto-interp fills Neuronpedia's gaps) and DEMOTE structural features — punctuation,
     # formatting, discourse glue, token fragments — by STRUCTURAL_PENALTY so genuine concept/medical
@@ -81,6 +85,11 @@ def _rank_features(candidates: list[dict]) -> list[dict]:
             penalty = config.STRUCTURAL_PENALTY if structural else 1.0
             scored.append((f.get("attr", 0.0) * penalty, _feature(f, s["label"])))
         scored.sort(key=lambda t: -t[0])
+        if config.DROP_UNLABELED:
+            semantic = [t for t in scored if not _unlabeled(t[1]) and not _is_syntactic(t[1]["label"])]
+            structural = [t for t in scored if not _unlabeled(t[1]) and _is_syntactic(t[1]["label"])]
+            if semantic:
+                scored = semantic + structural + [t for t in scored if _unlabeled(t[1])]
         return [feat for _, feat in scored[: config.TOPK_EVENT]]
 
     scored: list[tuple[float, dict]] = []
@@ -110,13 +119,23 @@ def _rank_features(candidates: list[dict]) -> list[dict]:
     return [feat for _, feat in scored[: config.TOPK_EVENT]]
 
 
-def _real_turn(messages: list[dict]) -> tuple[str, list[dict], dict]:
+def _real_turn(messages: list[dict]) -> tuple[str, list[dict], dict, dict]:
+    """Returns (answer, features, trackers, perf_stages) where perf_stages carries
+    pod_roundtrip_ms, ranking_ms, and pod_stages from the pod's additive timings."""
     from . import pod_client
 
+    _t_pod = time.perf_counter()
     r = pod_client.turn(messages, max_new=config.MAX_NEW_TOKENS)
+    pod_roundtrip_ms = (time.perf_counter() - _t_pod) * 1000.0
+
+    _t_rank = time.perf_counter()
     feats = _rank_features(r["candidates"])
+    ranking_ms = (time.perf_counter() - _t_rank) * 1000.0
+
     trackers = r.get("trackers") or {}
-    return r["answer"], feats, trackers
+    pod_stages = r.get("timings") or {}
+    stages = {"pod_roundtrip": pod_roundtrip_ms, "ranking": ranking_ms}
+    return r["answer"], feats, trackers, {"stages": stages, "pod_stages": pod_stages}
 
 
 def analyze_turn(
@@ -125,15 +144,18 @@ def analyze_turn(
     message_id: str | None = None,
     ts: float | None = None,
     strict: bool = False,
-) -> tuple[str, CognitionEvent]:
+) -> tuple[str, CognitionEvent, dict]:
     message_id = message_id or uuid.uuid4().hex
     ts = time.time() if ts is None else ts
+    _t_turn = time.perf_counter()
 
     if runtime.STATE["mode"] == "real":
         try:
-            answer, feats, trackers = _real_turn(messages)
+            answer, feats, trackers, timing_data = _real_turn(messages)
         except Exception as e:
             runtime.refresh_pod_health()
+            from . import fanout
+            fanout.report_error("pod-down", e)  # instrument_unhealthy concern → Sentry (sanitized)
             if strict:
                 raise RuntimeError(f"pod turn failed (strict mode, no fallback): {e}") from e
             print(f"[analyze] pod turn failed ({e}); synthetic fallback for this turn")
@@ -141,6 +163,7 @@ def analyze_turn(
 
             answer, feats = fallback.synth_turn(messages)
             trackers = {}
+            timing_data = {"stages": {}, "pod_stages": {}}
     else:
         if strict:
             raise RuntimeError(
@@ -150,6 +173,7 @@ def analyze_turn(
 
         answer, feats = fallback.synth_turn(messages)
         trackers = {}
+        timing_data = {"stages": {}, "pod_stages": {}}
 
     if strict:
         from .fallback import is_synthetic_response
@@ -167,4 +191,10 @@ def analyze_turn(
         model=config.MODEL_ID,
         layer=config.LAYER,
     )
-    return answer, event
+    turn_ms = (time.perf_counter() - _t_turn) * 1000.0
+    perf: dict = {
+        "turn_ms": turn_ms,
+        "stages": timing_data["stages"],
+        "pod_stages": timing_data["pod_stages"],
+    }
+    return answer, event, perf

@@ -22,8 +22,9 @@ function mulberry32(seed: number) {
   };
 }
 
-function ramp(act: number, suspect: boolean) {
-  if (suspect) return { r: 220, g: 47, b: 44 }; // signal red — unverified label
+function ramp(act: number, suspect: boolean, labeled = false) {
+  if (suspect) return { r: 220, g: 47, b: 44 }; // signal red — off-topic feature
+  if (labeled) return { r: 24, g: 24, b: 27 };
   // firing latents on a light field: mid-grey -> ink as activation rises
   const t = Math.min(act / 6.4, 1);
   const c1 = { r: 152, g: 152, b: 158 }, c2 = { r: 78, g: 78, b: 84 }, c3 = { r: 24, g: 24, b: 27 };
@@ -55,6 +56,12 @@ type Pt = Feature & {
 };
 
 const TOP = 5; // strongest N get a persistent label (suspects are always labelled too)
+const LOW_VALUE_LABEL =
+  /\bfeature\s+\d+\b|^okay\b|okay,\s*let'?s|greeting|acknowledg|transition to task|numbered list|code snippet|markdown|bullet|line break|paragraph|whitespace|punctuation|token fragment|word fragment|subword|function word/i;
+
+function showPersistentLabel(label: string) {
+  return !LOW_VALUE_LABEL.test(label);
+}
 
 export function FeatureField({ features, latents = 16384 }: { features: Feature[]; latents?: number }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -123,9 +130,15 @@ export function FeatureField({ features, latents = 16384 }: { features: Feature[
       // label placement — strongest first (best spot); avoid all dots + placed labels
       ctx.font = LABEL_FONT;
       const placed: Box[] = [];
+      const labeledFeatureIds = new Set(
+        features
+          .filter((ft) => showPersistentLabel(ft.label))
+          .slice(0, TOP)
+          .map((ft) => ft.index)
+      );
       features.forEach((ft, i) => {
         const p = pts[i];
-        if (!(i < TOP || p.suspect)) return;
+        if (!(labeledFeatureIds.has(ft.index) || p.suspect)) return;
         p.labeled = true;
         const lw = ctx.measureText(ft.label).width + 12, lh = 17, gap = p.R + 9;
         p.flip = p.bx > W * 0.6;
@@ -159,7 +172,13 @@ export function FeatureField({ features, latents = 16384 }: { features: Feature[
         const [fx, fy] = flow(a.bx, a.by, time);
         a.x = a.bx + fx * ease; a.y = a.by + fy * ease;
         const pulse = settled ? 1 : 1 + Math.sin(time / 680 + a.index) * 0.08 * ease;
-        const R = a.R * ease * pulse, col = ramp(a.actN, a.suspect);
+        const R = a.R * ease * pulse, col = ramp(a.actN, a.suspect, a.labeled);
+        if (a.labeled && settled) {
+          ctx.beginPath();
+          ctx.fillStyle = "rgba(24,24,27,.08)";
+          ctx.arc(a.x, a.y, R + 5.5, 0, 7);
+          ctx.fill();
+        }
         ctx.beginPath(); ctx.fillStyle = `rgba(${col.r | 0},${col.g | 0},${col.b | 0},${0.92 * ease})`; ctx.arc(a.x, a.y, R, 0, 7); ctx.fill();
         if (a.suspect && settled) { ctx.save(); ctx.strokeStyle = "rgba(220,47,44,.8)"; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.arc(a.x, a.y, R + 4.5 + Math.sin(time / 520 + a.index) * 1.1, 0, 7); ctx.stroke(); ctx.restore(); }
       });
@@ -189,7 +208,7 @@ export function FeatureField({ features, latents = 16384 }: { features: Feature[
       pts.forEach((a) => { if (a.prog < 0.4) return; const d = Math.hypot(a.x - mx, a.y - my); if (d < best + a.R) { best = d; hit = a; } });
       if (hit) {
         const h = hit as Pt;
-        tip!.innerHTML = `<span class="l">${h.label}</span>${h.caveat}<span class="av">act ${h.act.toFixed(1)} · #${h.index}</span><span class="b ${h.suspect ? "s" : "v"}">${h.suspect ? "unverified — likely mislabel" : "auto-interp label · unverified"}</span>`;
+        tip!.innerHTML = `<span class="l">${h.label}</span><span class="av">act ${h.act.toFixed(1)} · #${h.index}</span>${h.suspect ? `<span class="b s">off-topic</span>` : ""}`;
         tip!.style.left = `${Math.min(mx + 14, W - 225)}px`; tip!.style.top = `${Math.max(my - 10, 6)}px`; tip!.style.opacity = "1";
       } else tip!.style.opacity = "0";
     }
@@ -214,7 +233,7 @@ export function FeatureField({ features, latents = 16384 }: { features: Feature[
       </div>
       <div className="legend">
         <span><i style={{ background: "var(--ink)" }} />firing</span>
-        <span><i style={{ background: "var(--accent)" }} />unverified label</span>
+        <span><i style={{ background: "var(--accent)" }} />off-topic</span>
         <span className="hint">distance from centre ∝ activation</span>
       </div>
     </div>

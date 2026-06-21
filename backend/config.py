@@ -127,8 +127,18 @@ SENTRY_DSN = os.getenv(
 SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", "hackathon")
 SENTRY_RELEASE = os.getenv("SENTRY_RELEASE") or None  # None → Sentry auto-detects git SHA
 # PHI gate: when false, the raw user_msg/response are NOT attached to Sentry events.
-SENTRY_SEND_IO = os.getenv("SENTRY_SEND_IO", "1").lower() not in ("0", "false", "no", "")
+SENTRY_SEND_IO = os.getenv("SENTRY_SEND_IO", "0").lower() not in ("0", "false", "no", "")
 PHOENIX_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006")
+
+# --- Observability surfaces (read paths + eval) ---
+PHOENIX_UI_URL      = os.getenv("PHOENIX_UI_URL", PHOENIX_ENDPOINT)        # iframe src
+SENTRY_ORG_SLUG     = os.getenv("SENTRY_ORG_SLUG", "")
+SENTRY_PROJECT_SLUG = os.getenv("SENTRY_PROJECT_SLUG", "")
+SENTRY_AUTH_TOKEN   = os.getenv("SENTRY_AUTH_TOKEN", "")                    # internal-integration, event:read+project:read
+SENTRY_API_BASE     = os.getenv("SENTRY_API_BASE", "https://sentry.io").rstrip("/")
+SENTRY_ORG_URL      = os.getenv("SENTRY_ORG_URL", "https://sentry.io")     # deep-link host
+EVAL_LLM_PROVIDER   = os.getenv("EVAL_LLM_PROVIDER", "anthropic")
+EVAL_LLM_MODEL      = os.getenv("EVAL_LLM_MODEL", "claude-haiku-4-5-20251001")
 
 MASK_TOKENS = ["<bos>", "<start_of_turn>", "<end_of_turn>"]
 

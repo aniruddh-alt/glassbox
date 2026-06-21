@@ -99,3 +99,17 @@ def test_auth_rejects_bad_token(monkeypatch):
         headers={"Authorization": "Bearer secret"},
     )
     assert r.status_code == 200
+
+
+def test_turn_returns_timings(monkeypatch):
+    """Contract test: /turn response must include additive 'timings' key with capture/sae/trackers floats."""
+    _install_stubs(monkeypatch)
+    client = TestClient(gpu_service.app)
+    r = client.post("/turn", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 200
+    body = r.json()
+    assert "timings" in body, "timings key missing from /turn response"
+    t = body["timings"]
+    for key in ("capture", "sae", "trackers"):
+        assert key in t, f"timings.{key} missing"
+        assert isinstance(t[key], float) and t[key] >= 0.0, f"timings.{key} must be float >= 0"

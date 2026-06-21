@@ -53,3 +53,8 @@ def test_feature_label(monkeypatch):
     monkeypatch.setattr(labels, "get_label", lambda i, **k: f"feat-{i}")
     r = client.get("/api/feature/123")
     assert r.json()["label"] == "feat-123"
+
+
+# NOTE: tests for the old synth_concept-based /api/track were removed during the merge with
+# main — main's /api/track is job-based (create_job → pending → background agent). That flow
+# is currently untested (a pre-existing gap on main).

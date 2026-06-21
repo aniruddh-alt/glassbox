@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi import Depends, FastAPI, HTTPException, Request
 
 from . import config
@@ -57,12 +59,15 @@ def _run_recon_check() -> None:
 def _attempt_load() -> None:
     try:
         from . import engine
-        from .science import sae
+        from .science import persona, sae
 
         engine.load_engine()
         STATE["model_loaded"] = True
         sae.load_sae()
         STATE["sae_loaded"] = True
+        loaded = persona.load_artifacts()
+        if loaded:
+            print(f"[gpu_service] loaded probe trackers: {', '.join(loaded)}")
         STATE["mode"] = "real"
         _run_recon_check()
     except Exception as e:  # noqa: BLE001
@@ -229,7 +234,12 @@ def turn(body: dict) -> dict:
     messages = body.get("messages") or []
     max_new = int(body.get("max_new") or config.MAX_NEW_TOKENS)
     attribution = config.RANK_METHOD == "attribution"
+
+    _t0 = time.perf_counter()
     res = _capture(messages, max_new, attribution=attribution)
+    capture_ms = (time.perf_counter() - _t0) * 1000.0
+
+    _t1 = time.perf_counter()
     resp_acts, act_last, act_resp = _pooled_activations(res)
     grad = res.get("grad")
     resp_grad = grad[res["resp_start"] :] if grad is not None else None
@@ -237,10 +247,16 @@ def turn(body: dict) -> dict:
     candidates = _sae_candidates(
         res, resp_acts, resp_grad, cap=config.TOPK_CANDIDATES, baseline=baseline
     )
+    sae_ms = (time.perf_counter() - _t1) * 1000.0
+
+    _t2 = time.perf_counter()
     trackers = _score_trackers(act_last, act_resp)
+    trackers_ms = (time.perf_counter() - _t2) * 1000.0
+
     return {
         "answer": res["answer"],
         "candidates": candidates,
         "trackers": trackers,
         "reliable": True,
+        "timings": {"capture": capture_ms, "sae": sae_ms, "trackers": trackers_ms},
     }

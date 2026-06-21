@@ -59,6 +59,23 @@ def _pod_poll_loop() -> None:
         time.sleep(config.POD_POLL_INTERVAL)
 
 
+_poll_thread: threading.Thread | None = None
+
+
+def _ensure_poll_loop() -> None:
+    """Start the background pod-health poll loop once (idempotent).
+
+    Continuous polling is what lets a pod that blips offline and then recovers self-heal back
+    to mode=real. Without it the backend can get trapped in fallback: once mode != "real",
+    analyze_turn stops calling refresh_pod_health(), so nothing ever re-checks the pod.
+    """
+    global _poll_thread
+    if _poll_thread is not None and _poll_thread.is_alive():
+        return
+    _poll_thread = threading.Thread(target=_pod_poll_loop, daemon=True)
+    _poll_thread.start()
+
+
 def refresh_pod_health() -> dict:
     """Re-check pod readiness (e.g. after a failed turn)."""
     return _poll_pod_once()
@@ -67,8 +84,10 @@ def refresh_pod_health() -> dict:
 def start_loading() -> None:
     """Bring the real path online. Called once at FastAPI startup.
 
-    When POD_URL is set, poll the GPU pod (background thread by default, or synchronously
-    when GLASSBOX_EAGER_LOAD=1). When POD_URL is unset, stay on synthetic fallback.
+    When POD_URL is set, always keep a background poll running so a transient pod blip
+    self-heals. GLASSBOX_EAGER_LOAD=1 additionally does the first poll synchronously, so
+    startup blocks until the initial pod health is known. When POD_URL is unset, stay on
+    synthetic fallback.
     """
     if not config.POD_URL:
         STATE.update(
@@ -83,8 +102,7 @@ def start_loading() -> None:
     STATE["mode"] = "loading"
     if os.getenv("GLASSBOX_EAGER_LOAD") == "1":
         _poll_pod_once()
-    else:
-        threading.Thread(target=_pod_poll_loop, daemon=True).start()
+    _ensure_poll_loop()
 
 
 def health_payload() -> dict:

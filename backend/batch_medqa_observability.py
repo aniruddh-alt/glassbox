@@ -127,7 +127,7 @@ def main() -> None:
                 sys.exit(1)
 
         t0 = time.time()
-        answer, event = analyze_turn(
+        answer, event, _perf = analyze_turn(
             [{"role": "user", "content": question}],
             message_id=qid,
             strict=args.strict,

@@ -8,7 +8,19 @@ _UA = {"User-Agent": "glassbox-orchestration/0.1"}
 
 
 class PodError(Exception):
-    """Raised when the pod is unreachable or returns a non-2xx response."""
+    """Raised when the pod is unreachable or returns a non-2xx response.
+
+    Carries ONLY a status code and a static stage label — NEVER the response body,
+    because the body may echo the model answer and would leak to Sentry via report_error.
+    """
+
+    def __init__(self, status: int, stage: str) -> None:
+        self.status = status
+        self.stage = stage
+        super().__init__(str(self))
+
+    def __str__(self) -> str:
+        return f"pod {self.stage} failed: HTTP {self.status}"
 
 
 def _headers() -> dict[str, str]:
@@ -20,11 +32,11 @@ def _headers() -> dict[str, str]:
 
 def _base_url() -> str:
     if not config.POD_URL:
-        raise PodError("POD_URL is not configured")
+        raise ConnectionError("POD_URL is not configured")
     return config.POD_URL
 
 
-def _post(path: str, payload: dict) -> dict:
+def _post(path: str, payload: dict, stage: str = "request") -> dict:
     import httpx
 
     try:
@@ -35,9 +47,11 @@ def _post(path: str, payload: dict) -> dict:
             timeout=config.POD_TIMEOUT,
         )
     except httpx.HTTPError as e:
-        raise PodError(str(e)) from e
+        raise PodError(0, stage) from e
     if r.status_code != 200:
-        raise PodError(f"POST {path} returned {r.status_code}: {r.text[:200]}")
+        # LOCAL log only — the body may echo the model answer; never embed in the exception.
+        print(f"[pod] {stage} HTTP {r.status_code}: {r.text[:200]}")
+        raise PodError(r.status_code, stage)
     return r.json()
 
 
@@ -54,9 +68,9 @@ def health() -> dict | None:
             timeout=min(config.POD_TIMEOUT, 10.0),
         )
     except httpx.HTTPError as e:
-        raise PodError(str(e)) from e
+        raise PodError(0, "health") from e
     if r.status_code != 200:
-        raise PodError(f"GET /health returned {r.status_code}")
+        raise PodError(r.status_code, "health")
     return r.json()
 
 
@@ -65,6 +79,7 @@ def inference(messages: list[dict], *, max_new: int | None = None) -> dict:
     return _post(
         "/inference",
         {"messages": messages, "max_new": max_new or config.MAX_NEW_TOKENS},
+        stage="inference",
     )
 
 
@@ -82,6 +97,7 @@ def activations(
             "max_new": max_new or config.MAX_NEW_TOKENS,
             "attribution": attribution,
         },
+        stage="activations",
     )
 
 
@@ -101,7 +117,7 @@ def sae_features(
         body["attribution"] = attribution
     if cap is not None:
         body["cap"] = cap
-    return _post("/sae/features", body)
+    return _post("/sae/features", body, stage="sae_features")
 
 
 def turn(messages: list[dict], *, max_new: int | None = None) -> dict:
@@ -109,4 +125,5 @@ def turn(messages: list[dict], *, max_new: int | None = None) -> dict:
     return _post(
         "/turn",
         {"messages": messages, "max_new": max_new or config.MAX_NEW_TOKENS},
+        stage="turn",
     )

@@ -100,8 +100,9 @@ def test_rank_features_uses_attribution_when_present(monkeypatch):
     assert "attr" not in ranked[0]                      # stays internal; not in the event schema
 
 
-def test_rank_features_attribution_keeps_unlabeled(monkeypatch):
-    # the attribution path must NOT drop unlabeled features (the old DROP_UNLABELED footgun)
+def test_rank_features_attribution_keeps_unlabeled_after_labeled(monkeypatch):
+    # Attribution keeps unlabeled features as lower-priority evidence, but visible labels should
+    # prefer explainable features when they are available.
     stats = {
         1: {"label": "pregnancy", "max_act": 1.0, "density": 0.001},
         2: {"label": "feature 2", "max_act": None, "density": None},  # unlabeled
@@ -112,7 +113,45 @@ def test_rank_features_attribution_keeps_unlabeled(monkeypatch):
         {"index": 2, "act": 5.0, "attr": 0.8, "source": "s"},  # unlabeled but highest attribution
     ]
     ranked = analyze._rank_features(candidates)
-    assert [f["index"] for f in ranked] == [2, 1]   # unlabeled high-attr feature still surfaces
+    assert [f["index"] for f in ranked] == [1, 2]
+
+
+def test_rank_features_attribution_prefers_explainable_labels(monkeypatch):
+    monkeypatch.setattr(analyze.config, "DROP_UNLABELED", True)
+    stats = {
+        1: {"label": "pregnancy", "max_act": 1.0, "density": 0.001},
+        2: {"label": "feature 2", "max_act": None, "density": None},
+    }
+    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, **k: stats[i])
+    candidates = [
+        {"index": 2, "act": 5.0, "attr": 0.8, "source": "s"},
+        {"index": 1, "act": 5.0, "attr": 0.3, "source": "s"},
+    ]
+
+    ranked = analyze._rank_features(candidates)
+
+    assert [f["index"] for f in ranked] == [1, 2]
+
+
+def test_rank_features_attribution_prefers_semantic_labels(monkeypatch):
+    monkeypatch.setattr(analyze.config, "DROP_UNLABELED", True)
+    stats = {
+        1: {"label": "Okay,", "max_act": 1.0, "density": 0.2, "is_structural": False},
+        2: {"label": "numbered lists and code snippets", "max_act": 1.0, "density": 0.2, "is_structural": False},
+        3: {"label": "cancer, tumor, oncology", "max_act": 1.0, "density": 0.001, "is_structural": False},
+        469: {"label": "feature 469", "max_act": None, "density": None, "is_structural": False},
+    }
+    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, **k: stats[i])
+    candidates = [
+        {"index": 1, "act": 5.0, "attr": 5.0, "source": "s"},
+        {"index": 2, "act": 5.0, "attr": 4.0, "source": "s"},
+        {"index": 469, "act": 5.0, "attr": 3.0, "source": "s"},
+        {"index": 3, "act": 5.0, "attr": 0.2, "source": "s"},
+    ]
+
+    ranked = analyze._rank_features(candidates)
+
+    assert ranked[0]["label"] == "cancer, tumor, oncology"
 
 
 def test_attribution_demotes_structural_below_concept(monkeypatch):
@@ -131,8 +170,8 @@ def test_attribution_demotes_structural_below_concept(monkeypatch):
     assert [f["index"] for f in ranked] == [2, 1]
 
 
-def test_attribution_structural_survives_if_dominant(monkeypatch):
-    # demote, NOT drop: a structural feature that overwhelmingly dominates the answer still appears
+def test_attribution_structural_survives_below_semantic(monkeypatch):
+    # Structural features are still present as evidence, but semantic labels own the visible front.
     monkeypatch.setattr(analyze.config, "STRUCTURAL_PENALTY", 0.15)
     stats = {
         1: {"label": "paragraph breaks", "max_act": 1.0, "density": 0.1, "is_structural": True},
@@ -144,7 +183,7 @@ def test_attribution_structural_survives_if_dominant(monkeypatch):
         {"index": 2, "act": 5.0, "attr": 0.5, "source": "s"},
     ]
     ranked = analyze._rank_features(candidates)
-    assert [f["index"] for f in ranked] == [1, 2]
+    assert [f["index"] for f in ranked] == [2, 1]
     assert len(ranked) == 2  # nothing dropped
 
 

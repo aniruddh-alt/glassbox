@@ -15,10 +15,11 @@
   "flag": true,
   "severity": "warning",
   "trackers": {
-    "uncertainty":    {"score": 0.83, "proj": 1.27, "flag": true,  "reliable": true, "proj_pre": 0.91, "user_defined": false, "status": "ready"},
-    "harmful":        {"score": 0.12, "proj": -0.40, "flag": false, "reliable": true, "user_defined": false, "status": "ready"},
-    "hallucination":  {"score": 0.71, "proj": 0.90, "flag": true,  "reliable": true, "user_defined": false, "status": "ready"},
-    "overconfidence": {"score": 0.55, "proj": 0.30, "flag": false, "reliable": true, "user_defined": true,  "status": "ready"}
+    "uncertainty":     {"score": 0.83, "proj": 1.27, "flag": true,  "reliable": true, "proj_pre": 0.91, "alert_direction": "high", "user_defined": false, "status": "ready"},
+    "harmful":         {"score": 0.12, "proj": -0.40, "flag": false, "reliable": true, "alert_direction": "high", "user_defined": false, "status": "ready"},
+    "hallucination":   {"score": 0.71, "proj": 0.90, "flag": true,  "reliable": true, "alert_direction": "high", "user_defined": false, "status": "ready"},
+    "risk_awareness":  {"score": 0.24, "proj": -1.15, "flag": true, "reliable": true, "alert_direction": "low", "user_defined": false, "status": "ready"},
+    "overconfidence":  {"score": 0.55, "proj": 0.30, "flag": false, "reliable": true, "alert_direction": "high", "user_defined": true,  "status": "ready"}
   },
   "features": [
     {"index": 1622, "label": "references to clinical dosage", "act": 7.4, "source": "17-gemmascope-2-res-16k", "caveat": "auto-interp label, may be unreliable", "tracked": null},
