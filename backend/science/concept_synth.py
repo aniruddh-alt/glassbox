@@ -91,3 +91,28 @@ def fit_and_validate(rows: list[dict]) -> dict:
         "n_kept": len(rows), "calibrated": calibrated,
         "direction": direction, "calibrator": clf_all, "threshold": threshold,
     }
+
+
+def generate_contrastive(spec: dict, *, generate_fn=None, max_new: int = 64) -> list[dict]:
+    """For each question, run the model under pos and neg system prompts; capture
+    layer-LAYER response-mean (act_resp) and last-prompt-token (act_last) activations.
+    generate_fn defaults to engine.generate_and_capture (injectable for tests)."""
+    if generate_fn is None:
+        from .. import engine
+
+        generate_fn = engine.generate_and_capture
+
+    rows: list[dict] = []
+    for label, prompt in ((1, spec["pos_prompt"]), (0, spec["neg_prompt"])):
+        for q in spec["questions"]:
+            messages = [{"role": "user", "content": f"{prompt}\n\n{q}"}]
+            cap = generate_fn(messages, max_new=max_new)
+            acts = cap["acts"]
+            start = cap["resp_start"]
+            rows.append({
+                "response": cap["answer"],
+                "act_resp": acts[start:].float().mean(0),
+                "act_last": acts[start - 1].float(),
+                "intended_label": label,
+            })
+    return rows
