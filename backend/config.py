@@ -79,7 +79,7 @@ AUTOINTERP_MODEL = os.getenv("AUTOINTERP_MODEL", "claude-haiku-4-5")  # cheap, o
 STRUCTURAL_PENALTY = float(os.getenv("STRUCTURAL_PENALTY", "0.15"))
 
 # --- Family B (probes) ---
-BUILTIN_TRACKERS = ["uncertainty", "harmful", "hallucination", "risk_awareness"]
+BUILTIN_TRACKERS = ["uncertainty", "harmful", "hallucination"]
 # Thresholds are calibrated offline (validation/) and loaded from science/vectors/thresholds.json.
 DEFAULT_THRESHOLD = 0.5
 
