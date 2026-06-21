@@ -110,6 +110,8 @@ class NeuronpediaProvider(FeatureProvider):
         k: int = config.TOPK,
         cap: int = config.TOPK_EVENT,
     ) -> list[dict]:
+        if not os.getenv("GLASSBOX_ALLOW_REMOTE_FEATURES"):
+            raise RuntimeError("remote feature POST forbidden for patient data")
         import httpx
 
         url = f"{self.BASE}/api/activation/topk-by-token"
