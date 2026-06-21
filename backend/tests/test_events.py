@@ -16,6 +16,22 @@ def test_empty_trackers_yield_null_uncertainty():
     assert ev.layer == 17
 
 
+def test_over_confidence_tracker_populates_meter():
+    trackers = {
+        "over_confidence": {
+            "score": 0.83, "proj": 1.27, "proj_pre": 0.91, "flag": True,
+            "reliable": True, "status": "ready", "user_defined": False,
+        }
+    }
+    ev = build_cognition_event(
+        message_id="m2b", ts=1.0, user_msg="q", response="a",
+        trackers=trackers, features=[], model="m", layer=17,
+    )
+    assert ev.uncertainty == 0.83
+    assert ev.uncertainty_proj == 1.27
+    assert ev.flag is True
+
+
 def test_uncertainty_tracker_populates_meter():
     trackers = {
         "uncertainty": {

@@ -61,7 +61,11 @@ def fit_and_validate(rows: list[dict]) -> dict:
     if len(rows) < 6 or (y == 1).sum() < 3 or (y == 0).sum() < 3:
         return fail
 
-    X = torch.stack([r["act_resp"].float() for r in rows])  # [n, d_in]
+    # act_resp tensors live on the model device (MPS locally, CUDA on the pod); the sklearn /
+    # roc_auc_score calls below need host memory, so move the stack to CPU once here. Without it,
+    # X[...].numpy() raises "can't convert <device> tensor to numpy" and the agent path fails on
+    # any accelerator. persona.train_probe already .cpu()s internally; this covers the direct calls.
+    X = torch.stack([r["act_resp"].float() for r in rows]).cpu()  # [n, d_in], on CPU
     idx = np.arange(len(rows))
     try:
         tr, te = train_test_split(idx, test_size=0.3, stratify=y, random_state=0)
@@ -96,7 +100,12 @@ def generate_contrastive(spec: dict, *, generate_fn=None, max_new: int = 64) -> 
     if generate_fn is None:
         from .. import engine
 
-        generate_fn = engine.generate_and_capture
+        def generate_fn(messages, max_new=max_new):
+            # Probe training pools response-mean activations; skip attribution (same as
+            # harmfulness_pipeline) so we always take the full-sequence capture path.
+            return engine.generate_and_capture(
+                messages, max_new=max_new, attribution=False
+            )
 
     rows: list[dict] = []
     for label, prompt in ((1, spec["pos_prompt"]), (0, spec["neg_prompt"])):

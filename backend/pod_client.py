@@ -127,3 +127,28 @@ def turn(messages: list[dict], *, max_new: int | None = None) -> dict:
         {"messages": messages, "max_new": max_new or config.MAX_NEW_TOKENS},
         stage="turn",
     )
+
+
+def track(request: str) -> dict:
+    """POST /api/track → {tracker_id, status}. Body carries only the NL request (no PHI)."""
+    return _post("/api/track", {"request": request}, stage="track")
+
+
+def track_status(tracker_id: str) -> dict:
+    """GET /api/track/{id} → the probe-job record. A 404 from the pod maps to {"status": "unknown"}
+    rather than an error, so a stale/forgotten tracker_id is reported, not raised."""
+    import httpx
+
+    try:
+        r = httpx.get(
+            f"{_base_url()}/api/track/{tracker_id}",
+            headers=_headers(),
+            timeout=min(config.POD_TIMEOUT, 15.0),
+        )
+    except httpx.HTTPError as e:
+        raise PodError(0, "track_status") from e
+    if r.status_code == 404:
+        return {"status": "unknown"}
+    if r.status_code != 200:
+        raise PodError(r.status_code, "track_status")
+    return r.json()

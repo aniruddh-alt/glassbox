@@ -28,7 +28,7 @@ export function useObservability(): { snapshot: ObservabilitySnapshot | null; st
     };
 
     poll();
-    const id = setInterval(poll, 2000);
+    const id = setInterval(poll, 1000);
 
     return () => {
       alive = false;

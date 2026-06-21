@@ -1,35 +1,73 @@
-// Observability page — six sections surfacing the GET /api/observability snapshot.
-// No new npm deps; hand-rolled SVG for sparklines/bars. Uses CSS tokens from styles.css.
-// OWNER: Lane C.
+// Observability page — live GET /api/observability snapshot (no demo fallback on the happy path).
+// Health fields populate infrastructure panels even before the first chat turn lands in the store.
 import { useState } from "react";
 
-import type { ObservabilitySnapshot, ObsConfidentWrong } from "./types";
+import type { ObservabilitySnapshot, ObsConfidentWrong, ObsHealth } from "./types";
 import { useObservability } from "./useObservability";
-import { DEMO_OBSERVABILITY_SNAPSHOT } from "./mock";
-import { runEval } from "./api";
+import { runEval, testSentryAlarm } from "./api";
+import { ACTIVE_PROBES, probeLabel } from "./probes";
+import { collectProbeIds, useProbeVisibility } from "./useProbeVisibility";
+import { ProbeVisibilityPanel } from "./components/ProbeVisibilityPanel";
 
-// ── Sparkline (SVG polyline over a series of [0,1]-ish values) ────────────────
+// ── Formatting ────────────────────────────────────────────────────────────────
 
-function Sparkline({ series, width = 96, height = 32 }: { series: number[]; width?: number; height?: number }) {
+function fmtMs(ms: number | null | undefined): string {
+  return ms == null ? "—" : `${Math.round(ms).toLocaleString()} ms`;
+}
+
+function fmtPct(rate: number): string {
+  return `${(rate * 100).toFixed(0)}%`;
+}
+
+function shortId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 8)}…` : id;
+}
+
+function humanize(s: string): string {
+  return s.replace(/_/g, " ");
+}
+
+function shortModel(model: string): string {
+  const parts = model.split("/");
+  return parts[parts.length - 1] ?? model;
+}
+
+function mean(xs: number[]): number | null {
+  return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+}
+
+// ── Sparkline ─────────────────────────────────────────────────────────────────
+
+function Sparkline({
+  series,
+  width = 96,
+  height = 32,
+  accent = false,
+}: {
+  series: number[];
+  width?: number;
+  height?: number;
+  accent?: boolean;
+}) {
   if (!series.length) {
     return (
-      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
         <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="var(--line-2)" strokeWidth="1" />
       </svg>
     );
   }
-  const max = Math.max(...series, 1);
+  const max = Math.max(...series, 0.01);
   const pts = series
     .map((v, i) => {
       const x = series.length === 1 ? width / 2 : (i / (series.length - 1)) * width;
-      const y = height - 2 - ((v / max) * (height - 4));
+      const y = height - 2 - (v / max) * (height - 4);
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(" ");
   const lastVal = series[series.length - 1];
-  const hot = lastVal / max >= 0.6;
+  const hot = accent || lastVal / max >= 0.6;
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ overflow: "visible" }}>
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ overflow: "visible" }} aria-hidden="true">
       <polyline
         points={pts}
         fill="none"
@@ -42,36 +80,151 @@ function Sparkline({ series, width = 96, height = 32 }: { series: number[]; widt
   );
 }
 
-// ── TrackerStrip ────────────────────────────────────────────────────────────
+// ── Loading skeleton ──────────────────────────────────────────────────────────
 
-function TrackerStrip({ snapshot }: { snapshot: ObservabilitySnapshot }) {
-  const entries = Object.entries(snapshot.trackers);
-  if (!entries.length) {
-    return (
-      <section className="panel obs-section">
-        <div className="ph"><h2>Probes</h2><span className="sub">no probes registered</span></div>
-        <p className="obs-empty">Calibrated probes appear here once registered.</p>
-      </section>
-    );
-  }
+function PanelSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <section className="panel obs-section obs-skeleton">
+      <div className="ph"><div className="obs-sk-line w40" /><div className="obs-sk-line w20" /></div>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="obs-sk-row"><div className="obs-sk-line w60" /><div className="obs-sk-bar" /></div>
+      ))}
+    </section>
+  );
+}
+
+// ── System status hero (always from health — wired even with 0 turns) ─────────
+
+function SystemHero({ health, turns }: { health: ObsHealth; turns: number }) {
+  const probes = ACTIVE_PROBES.filter(
+    (id) => !(health.trackers?.length) || health.trackers.includes(id),
+  );
+  return (
+    <section className="obs-hero panel">
+      <div className="obs-hero-main">
+        <span className={`badge ${health.mode}`}>
+          {health.mode === "real" ? "live model" : health.mode === "fallback" ? "synthetic · offline" : "warming up"}
+        </span>
+        <h2 className="obs-hero-title">{shortModel(health.model)} · layer {health.layer}</h2>
+        <p className="obs-hero-sub">
+          {turns > 0
+            ? `${turns} turn${turns !== 1 ? "s" : ""} in the in-process ledger`
+            : "Infrastructure ready — send a chat message to start recording turns"}
+        </p>
+      </div>
+      <dl className="obs-hero-grid">
+        <div className="obs-hero-stat">
+          <dt>GPU pod</dt>
+          <dd className={health.pod_reachable ? "ok" : "warn"}>
+            {health.pod_reachable ? "reachable" : "unreachable"}
+          </dd>
+        </div>
+        <div className="obs-hero-stat">
+          <dt>SAE</dt>
+          <dd className={health.sae_loaded ? "ok" : ""}>{health.sae_loaded ? `${health.d_sae.toLocaleString()} latents` : "loading"}</dd>
+        </div>
+        <div className="obs-hero-stat">
+          <dt>Recon cosine</dt>
+          <dd className={health.sae_recon_ok ? "ok" : health.sae_recon_cosine != null ? "warn" : ""}>
+            {health.sae_recon_cosine != null ? health.sae_recon_cosine.toFixed(3) : "—"}
+          </dd>
+        </div>
+        <div className="obs-hero-stat">
+          <dt>Probes loaded</dt>
+          <dd>{probes.length ? probes.map(probeLabel).join(" · ") : "none"}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+// ── KPI strip ─────────────────────────────────────────────────────────────────
+
+type Kpi = { label: string; value: string; unit?: string; tone?: "accent" | "ok" | "muted" };
+
+function KpiStrip({ snapshot }: { snapshot: ObservabilitySnapshot }) {
+  const { totals, flag_rate, trackers, latency, uncertainty_series, health } = snapshot;
+  const probeCount = ACTIVE_PROBES.length;
+  const uncMean = mean(uncertainty_series);
+
+  const kpis: Kpi[] = [
+    { label: "Turns recorded", value: `${totals.turns}`, tone: totals.turns > 0 ? undefined : "muted" },
+    {
+      label: "Flag rate",
+      value: totals.turns ? fmtPct(flag_rate) : "—",
+      tone: flag_rate >= 0.5 ? "accent" : totals.turns ? undefined : "muted",
+    },
+    {
+      label: "Flagged turns",
+      value: `${totals.flags}`,
+      tone: totals.flags > 0 ? "accent" : "muted",
+    },
+    { label: "Probes", value: `${probeCount}`, tone: probeCount ? "ok" : "muted" },
+    {
+      label: "Turn p50",
+      value: latency.turn_ms.p50 != null ? `${Math.round(latency.turn_ms.p50).toLocaleString()}` : "—",
+      unit: latency.turn_ms.p50 != null ? "ms" : undefined,
+      tone: latency.turn_ms.p50 != null ? undefined : "muted",
+    },
+    {
+      label: "Mean over-confidence",
+      value: uncMean != null ? uncMean.toFixed(2) : "—",
+      tone: uncMean != null && uncMean >= 0.6 ? "accent" : uncMean != null ? undefined : "muted",
+    },
+  ];
+
+  return (
+    <div className="obs-kpis">
+      {kpis.map((k) => (
+        <div key={k.label} className="obs-kpi">
+          <span className="obs-kpi-val" data-tone={k.tone}>
+            {k.value}
+            {k.unit && <i className="obs-kpi-unit">{k.unit}</i>}
+          </span>
+          <span className="obs-kpi-label">{k.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Tracker strip (registered probes from health, series from store) ──────────
+
+function TrackerStrip({
+  snapshot,
+  visibleIds,
+}: {
+  snapshot: ObservabilitySnapshot;
+  visibleIds: string[];
+}) {
+  const registered = snapshot.health.trackers ?? [];
+  const orderedIds = visibleIds.filter(
+    (id) => !(ACTIVE_PROBES as readonly string[]).includes(id) || !registered.length || registered.includes(id),
+  );
+  const data = snapshot.trackers;
+  const totalFlags = orderedIds.reduce((a, id) => a + (data[id]?.flag_count ?? 0), 0);
+
   return (
     <section className="panel obs-section">
       <div className="ph">
         <h2>Probes</h2>
-        <span className="sub">{entries.length} tracker{entries.length !== 1 ? "s" : ""}</span>
-        <span className="right">flags: <b>{entries.reduce((a, [, t]) => a + t.flag_count, 0)}</b></span>
+        <span className="sub">{orderedIds.map(probeLabel).join(" · ")}</span>
+        <span className="right">session flags: <b>{totalFlags}</b></span>
       </div>
       <div className="obs-tracker-strip">
-        {entries.map(([id, tracker]) => {
-          const hot = (tracker.current ?? 0) >= 0.6;
+        {orderedIds.map((id) => {
+          const t = data[id];
+          const hot = (t?.current ?? 0) >= 0.6;
           return (
             <div key={id} className={`obs-tracker-row${hot ? " hot" : ""}`}>
-              <span className="obs-tracker-name">{id}</span>
-              <Sparkline series={tracker.series} />
+              <span className="obs-tracker-name">{probeLabel(id)}</span>
+              <Sparkline series={t?.series ?? []} width={120} accent={hot} />
               <span className={`obs-tracker-val${hot ? " fl" : ""}`}>
-                {tracker.current != null ? tracker.current.toFixed(2) : "—"}
+                {t?.current != null ? t.current.toFixed(2) : "—"}
               </span>
-              <span className="obs-tracker-flags">{tracker.flag_count} flags</span>
+              <span className="obs-tracker-flags">
+                {t ? `${t.flag_count} flag${t.flag_count !== 1 ? "s" : ""}` : "awaiting turn"}
+              </span>
             </div>
           );
         })}
@@ -80,18 +233,57 @@ function TrackerStrip({ snapshot }: { snapshot: ObservabilitySnapshot }) {
   );
 }
 
-// ── ConfidentWrongFeed ──────────────────────────────────────────────────────
-// Shows ONLY feature_labels + tracker scores — no question/answer in the data.
+// ── Uncertainty trend ─────────────────────────────────────────────────────────
 
-function ConfidentWrongFeed({ items }: { items: ObsConfidentWrong[] }) {
+function OverConfidenceTrend({ series }: { series: number[] }) {
+  const last = series.length ? series[series.length - 1] : null;
+  const avg = mean(series);
+
+  return (
+    <section className="panel obs-section">
+      <div className="ph">
+        <h2>Over-confidence trend</h2>
+        <span className="sub">{series.length ? `${series.length} turns` : "no samples"}</span>
+        {last != null && (
+          <span className="right">latest <b className={last >= 0.6 ? "fl" : ""}>{last.toFixed(2)}</b></span>
+        )}
+      </div>
+      {series.length ? (
+        <div className="obs-unc-body">
+          <Sparkline series={series} width={280} height={48} accent={last != null && last >= 0.6} />
+          <div className="obs-unc-meta">
+            <span>mean {avg != null ? avg.toFixed(2) : "—"}</span>
+            <span>min {Math.min(...series).toFixed(2)}</span>
+            <span>max {Math.max(...series).toFixed(2)}</span>
+          </div>
+        </div>
+      ) : (
+        <p className="obs-empty">Over-confidence probe scores plot here once chat turns are recorded.</p>
+      )}
+    </section>
+  );
+}
+
+// ── Confident-wrong feed ──────────────────────────────────────────────────────
+
+function ConfidentWrongFeed({
+  items,
+  visibleIds,
+}: {
+  items: ObsConfidentWrong[];
+  visibleIds: string[];
+}) {
   if (!items.length) {
     return (
       <section className="panel obs-section">
         <div className="ph"><h2>Confident-wrong feed</h2><span className="sub">no flagged turns</span></div>
-        <p className="obs-empty">Flagged turns (low uncertainty, wrong answer) appear here.</p>
+        <p className="obs-empty">
+          Flagged turns surface here with feature labels and probe scores — never the raw question or answer.
+        </p>
       </section>
     );
   }
+
   return (
     <section className="panel obs-section">
       <div className="ph">
@@ -99,31 +291,36 @@ function ConfidentWrongFeed({ items }: { items: ObsConfidentWrong[] }) {
         <span className="right"><b>{items.length}</b> flagged</span>
       </div>
       <div className="obs-cw-list">
-        {items.map((item) => {
-          const trackerEntries = Object.entries(item.trackers);
+        {[...items].reverse().map((item) => {
+          const trackerEntries = Object.entries(item.trackers ?? {}).filter(([tid]) =>
+            visibleIds.includes(tid),
+          );
           return (
             <div key={item.message_id} className="obs-cw-item">
               <div className="obs-cw-meta">
-                <span className="obs-cw-id">{item.message_id}</span>
-                <span className="obs-cw-unc">
-                  {item.uncertainty != null ? `unc ${item.uncertainty.toFixed(2)}` : ""}
-                </span>
-                <span className="obs-cw-ts">{new Date(item.ts * 1000).toLocaleTimeString()}</span>
+                <span className="obs-cw-id" title={item.message_id}>{shortId(item.message_id)}</span>
+                <span className="obs-cw-ts">{new Date(item.ts * 1000).toLocaleString()}</span>
               </div>
               {trackerEntries.length > 0 && (
                 <div className="obs-cw-trackers">
-                  {trackerEntries.map(([tid, t]) => (
-                    <span key={tid} className={`obs-cw-score${t.flag ? " fl" : ""}`}>
-                      {tid}: {t.score.toFixed(2)}
-                    </span>
+                  {trackerEntries.map(([tid, t]) => {
+                    const score = typeof t.score === "number" ? t.score : null;
+                    if (score == null) return null;
+                    return (
+                      <span key={tid} className={`obs-cw-score${t.flag ? " fl" : ""}`}>
+                        {probeLabel(tid)} {score.toFixed(2)}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {item.feature_labels.length > 0 && (
+                <div className="obs-cw-labels">
+                  {item.feature_labels.map((lbl) => (
+                    <span key={lbl} className="obs-label-chip">{lbl}</span>
                   ))}
                 </div>
               )}
-              <div className="obs-cw-labels">
-                {item.feature_labels.map((lbl) => (
-                  <span key={lbl} className="obs-label-chip">{lbl}</span>
-                ))}
-              </div>
             </div>
           );
         })}
@@ -132,39 +329,37 @@ function ConfidentWrongFeed({ items }: { items: ObsConfidentWrong[] }) {
   );
 }
 
-// ── FeatureLeaderboard ──────────────────────────────────────────────────────
+// ── Feature leaderboard ───────────────────────────────────────────────────────
 
 function FeatureLeaderboard({ snapshot }: { snapshot: ObservabilitySnapshot }) {
   const features = snapshot.top_features;
   if (!features.length) {
     return (
       <section className="panel obs-section">
-        <div className="ph"><h2>Feature leaderboard</h2><span className="sub">no data yet</span></div>
-        <p className="obs-empty">Top activated SAE features across all turns.</p>
+        <div className="ph"><h2>Feature leaderboard</h2><span className="sub">no activations yet</span></div>
+        <p className="obs-empty">Top SAE features by activation count across all recorded turns.</p>
       </section>
     );
   }
+
   const maxCount = features[0].count;
   return (
     <section className="panel obs-section">
       <div className="ph">
         <h2>Feature leaderboard</h2>
-        <span className="sub">top {features.length} by activation count</span>
+        <span className="sub">top {features.length} by count</span>
       </div>
       <div className="obs-leaderboard">
         {features.map((f) => (
           <div key={f.label} className="obs-lb-row">
-            <span className="obs-lb-label">{f.label}</span>
+            <span className="obs-lb-label" title={f.label}>{f.label}</span>
+            <span className="obs-lb-meta">
+              <span className="obs-lb-count">{f.count}×</span>
+              {f.mean_act != null && <span className="obs-lb-act">μ {f.mean_act.toFixed(2)}</span>}
+            </span>
             <div className="obs-lb-bar-wrap">
-              <div
-                className="obs-lb-bar"
-                style={{ width: `${(f.count / maxCount) * 100}%` }}
-              />
+              <div className="obs-lb-bar" style={{ width: `${(f.count / maxCount) * 100}%` }} />
             </div>
-            <span className="obs-lb-count">{f.count}</span>
-            {f.mean_act != null && (
-              <span className="obs-lb-act">{f.mean_act.toFixed(2)}</span>
-            )}
           </div>
         ))}
       </div>
@@ -172,7 +367,7 @@ function FeatureLeaderboard({ snapshot }: { snapshot: ObservabilitySnapshot }) {
   );
 }
 
-// ── LatencyHealth ───────────────────────────────────────────────────────────
+// ── Latency & health ──────────────────────────────────────────────────────────
 
 function LatencyBar({ label, ms, maxMs }: { label: string; ms: number | null; maxMs: number }) {
   const pct = ms != null && maxMs > 0 ? (ms / maxMs) * 100 : 0;
@@ -182,26 +377,7 @@ function LatencyBar({ label, ms, maxMs }: { label: string; ms: number | null; ma
       <div className="obs-lat-bar-wrap">
         <div className="obs-lat-bar" style={{ width: `${pct}%` }} />
       </div>
-      <span className="obs-lat-val">{ms != null ? `${ms}ms` : "—"}</span>
-    </div>
-  );
-}
-
-function ReconGauge({ cosine }: { cosine: number | null }) {
-  const pct = cosine != null ? cosine * 100 : 0;
-  const ok = cosine == null || cosine >= 0.8;
-  return (
-    <div className="obs-recon">
-      <span className="obs-recon-label">SAE recon cosine</span>
-      <div className="obs-recon-track">
-        <div
-          className="obs-recon-fill"
-          style={{ width: `${pct}%`, background: ok ? "var(--ok)" : "var(--accent)" }}
-        />
-      </div>
-      <span className="obs-recon-val" style={{ color: ok ? "var(--ok)" : "var(--accent)" }}>
-        {cosine != null ? cosine.toFixed(3) : "—"}
-      </span>
+      <span className="obs-lat-val">{fmtMs(ms)}</span>
     </div>
   );
 }
@@ -217,42 +393,54 @@ function LatencyHealth({
 }) {
   const { latency, health } = snapshot;
   const stageOrder = ["pod_roundtrip", "capture", "sae", "trackers", "label_fetch", "ranking"] as const;
-  const maxStageMs = Math.max(
-    ...stageOrder.map((s) => latency.stages[s]?.p50 ?? 0),
-    1
-  );
+  const presentStages = stageOrder.filter((s) => latency.stages[s]?.p50 != null);
+  const maxStageMs = Math.max(...presentStages.map((s) => latency.stages[s]!.p50!), 1);
+  const hasTurnLatency = latency.turn_ms.p50 != null;
 
   return (
     <section className="panel obs-section">
       <div className="ph">
-        <h2>Latency &amp; health</h2>
-        <span className={`badge ${health.mode}`} style={{ fontSize: "12px" }}>
-          {health.mode === "real" ? "live model" : health.mode === "fallback" ? "synthetic · offline" : "warming up"}
-        </span>
-        <span className="right">
-          p50 <b>{latency.turn_ms.p50 != null ? `${latency.turn_ms.p50}ms` : "—"}</b>
-          {" "}&middot;{" "}
-          p95 <b>{latency.turn_ms.p95 != null ? `${latency.turn_ms.p95}ms` : "—"}</b>
-        </span>
-      </div>
-      <div className="obs-lat-list">
-        {stageOrder.map((s) =>
-          latency.stages[s] ? (
-            <LatencyBar key={s} label={s} ms={latency.stages[s].p50} maxMs={maxStageMs} />
-          ) : null
+        <h2>Latency</h2>
+        {hasTurnLatency ? (
+          <span className="right">
+            p50 <b>{fmtMs(latency.turn_ms.p50)}</b>
+            {" · "}
+            p95 <b>{fmtMs(latency.turn_ms.p95)}</b>
+            {latency.turn_ms.last != null && <> · last <b>{fmtMs(latency.turn_ms.last)}</b></>}
+          </span>
+        ) : (
+          <span className="sub">percentiles appear after the first turn</span>
         )}
       </div>
+
+      {presentStages.length ? (
+        <div className="obs-lat-list">
+          {presentStages.map((s) => (
+            <LatencyBar key={s} label={humanize(s)} ms={latency.stages[s]!.p50} maxMs={maxStageMs} />
+          ))}
+        </div>
+      ) : (
+        <div className="obs-lat-empty">
+          <p>Pipeline stage timings (pod roundtrip, SAE encode, probe scoring, label fetch) populate here from the in-process perf ledger.</p>
+          <ul>
+            <li>Model: <b>{shortModel(health.model)}</b></li>
+            <li>Pod: <b className={health.pod_reachable ? "ok" : "warn"}>{health.pod_reachable ? "connected" : "disconnected"}</b></li>
+            <li>SAE recon: <b className={health.sae_recon_ok ? "ok" : ""}>{health.sae_recon_cosine?.toFixed(3) ?? "—"}</b></li>
+          </ul>
+        </div>
+      )}
+
       <div className="obs-lat-footer">
-        <ReconGauge cosine={health.sae_recon_cosine} />
         <button
           className="obs-eval-btn"
           onClick={onEval}
-          disabled={evalRunning}
+          disabled={evalRunning || snapshot.totals.turns === 0}
           aria-busy={evalRunning}
+          title={snapshot.totals.turns === 0 ? "Record at least one chat turn first" : undefined}
         >
           {evalRunning ? (
             <>
-              <span className="obs-spinner" aria-hidden="true" /> Running eval&hellip;
+              <span className="obs-spinner" aria-hidden="true" /> Running coherence eval…
             </>
           ) : (
             "Run coherence eval"
@@ -263,50 +451,66 @@ function LatencyHealth({
   );
 }
 
-// ── PhoenixEmbed ────────────────────────────────────────────────────────────
+// ── Sentry (inline issues — already wired via /api/observability) ───────────────
 
-function PhoenixEmbed({ url }: { url: string }) {
-  return (
-    <section className="panel obs-section">
-      <div className="ph">
-        <h2>Phoenix ledger</h2>
-        <a className="obs-ext-link" href={url} target="_blank" rel="noreferrer">
-          open in new tab
-        </a>
-      </div>
-      <iframe
-        src={url}
-        title="Arize Phoenix"
-        className="obs-phoenix-iframe"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-      />
-    </section>
-  );
-}
-
-// ── SentryStrip ─────────────────────────────────────────────────────────────
-// REST issues → permalink deep-links. NOT an iframe (X-Frame-Options: deny).
-
-function SentryStrip({ snapshot }: { snapshot: ObservabilitySnapshot }) {
+function SentryPanel({
+  snapshot,
+  onTestAlarm,
+  testRunning,
+  testResult,
+}: {
+  snapshot: ObservabilitySnapshot;
+  onTestAlarm: () => void;
+  testRunning: boolean;
+  testResult: string | null;
+}) {
   const { sentry } = snapshot;
+  const issues = sentry.issues ?? [];
+  const canRead = sentry.configured;
+  const canEmit = sentry.emit_configured !== false;
+
   return (
     <section className="panel obs-section">
       <div className="ph">
         <h2>Sentry alarms</h2>
-        {sentry.deep_link && (
+        {canRead && sentry.deep_link && (
           <a className="obs-ext-link" href={sentry.deep_link} target="_blank" rel="noreferrer">
-            open in Sentry
+            open project ↗
           </a>
         )}
-        {!sentry.configured && <span className="sub">not configured</span>}
+        {!canRead && !canEmit && <span className="sub">not configured</span>}
       </div>
-      {!sentry.issues.length ? (
-        <p className="obs-empty">
-          {sentry.configured ? "No recent alarms." : "Set SENTRY_AUTH_TOKEN to enable the issues feed."}
-        </p>
-      ) : (
+      {!canEmit && (
+        <p className="obs-empty">Set <code>SENTRY_DSN</code> on the backend to emit alarms when a probe flags a turn.</p>
+      )}
+      {canEmit && !canRead && (
+        <p className="obs-empty">Alarms emit on flagged turns. Set <code>SENTRY_AUTH_TOKEN</code> to list recent issues here.</p>
+      )}
+      {canEmit && (
+        <div className="obs-lat-footer">
+          <button
+            type="button"
+            className="obs-eval-btn"
+            onClick={onTestAlarm}
+            disabled={testRunning}
+            aria-busy={testRunning}
+          >
+            {testRunning ? (
+              <>
+                <span className="obs-spinner" aria-hidden="true" /> Sending test alarm…
+              </>
+            ) : (
+              "Send test Sentry alarm"
+            )}
+          </button>
+          {testResult && <span className="obs-eval-result">{testResult}</span>}
+        </div>
+      )}
+      {canRead && !issues.length ? (
+        <p className="obs-empty">No recent alarms — flagged turns and system errors surface here once emitted.</p>
+      ) : canRead ? (
         <div className="obs-sentry-list">
-          {sentry.issues.map((issue) => (
+          {issues.slice(0, 6).map((issue) => (
             <a
               key={issue.shortId}
               href={issue.permalink}
@@ -317,64 +521,161 @@ function SentryStrip({ snapshot }: { snapshot: ObservabilitySnapshot }) {
               <span className={`obs-sentry-level obs-level-${issue.level}`}>{issue.level}</span>
               <span className="obs-sentry-title">{issue.title}</span>
               <span className="obs-sentry-meta">
-                {issue.shortId} &middot; {issue.count} events &middot; {new Date(issue.lastSeen).toLocaleString()}
+                {issue.shortId} · {issue.count} events · {new Date(issue.lastSeen).toLocaleString()}
               </span>
             </a>
           ))}
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
 
-// ── ObservabilityPage ────────────────────────────────────────────────────────
+function PhoenixPanel({ url }: { url: string }) {
+  return (
+    <section className="panel obs-section">
+      <div className="ph">
+        <h2>Phoenix ledger</h2>
+        <a className="obs-ext-link" href={url} target="_blank" rel="noreferrer">open ↗</a>
+      </div>
+      <a className="obs-link-row" href={url} target="_blank" rel="noreferrer">
+        <span className="obs-link-text">
+          <b>Open trace waterfall &amp; evals</b>
+          <span className="obs-link-sub">{url} — span ledger for every cognition turn (no prompt/response)</span>
+        </span>
+        <span className="obs-link-arrow" aria-hidden="true">↗</span>
+      </a>
+    </section>
+  );
+}
+
+// ── Page root ─────────────────────────────────────────────────────────────────
 
 export function ObservabilityPage() {
-  const { snapshot: liveSnapshot, status } = useObservability();
-  const snapshot = liveSnapshot ?? DEMO_OBSERVABILITY_SNAPSHOT;
-
+  const { snapshot, status } = useObservability();
+  const { filterIds } = useProbeVisibility();
   const [evalRunning, setEvalRunning] = useState(false);
   const [evalResult, setEvalResult] = useState<string | null>(null);
+  const [sentryTestRunning, setSentryTestRunning] = useState(false);
+  const [sentryTestResult, setSentryTestResult] = useState<string | null>(null);
+
+  async function handleSentryTest() {
+    if (sentryTestRunning) return;
+    setSentryTestRunning(true);
+    setSentryTestResult(null);
+    try {
+      const res = await testSentryAlarm();
+      setSentryTestResult(
+        res.ok
+          ? `Test alarm sent (${res.message_id}) — check Sentry Issues`
+          : "Test alarm failed",
+      );
+    } catch (e) {
+      setSentryTestResult(e instanceof Error ? e.message : "Test alarm failed");
+    } finally {
+      setSentryTestRunning(false);
+    }
+  }
 
   async function handleEval() {
-    if (evalRunning) return;
+    if (evalRunning || !snapshot) return;
     setEvalRunning(true);
     setEvalResult(null);
     try {
       const res = await runEval();
-      if ("status" in res) {
-        setEvalResult(res.status);
-      } else {
-        setEvalResult(`evaluated ${res.evaluated}, off-domain ${res.off_domain}`);
-      }
+      setEvalResult("status" in res ? res.status : `evaluated ${res.evaluated}, off-domain ${res.off_domain}`);
     } catch {
-      setEvalResult("error");
+      setEvalResult("eval failed — check Phoenix is running on :6006");
     } finally {
       setEvalRunning(false);
     }
   }
 
+  if (status === "loading" && !snapshot) {
+    return (
+      <div className="obs-page">
+        <div className="obs-head">
+          <h1>Observability</h1>
+          <span className="obs-head-status">Connecting to backend…</span>
+        </div>
+        <PanelSkeleton rows={2} />
+        <div className="obs-grid"><PanelSkeleton /><PanelSkeleton /></div>
+        <PanelSkeleton rows={4} />
+      </div>
+    );
+  }
+
+  if (status === "error" && !snapshot) {
+    return (
+      <div className="obs-page">
+        <div className="obs-head">
+          <h1>Observability</h1>
+          <span className="obs-head-status err">Backend unreachable</span>
+        </div>
+        <section className="panel obs-section obs-error-card">
+          <p><b>Cannot reach GET /api/observability.</b></p>
+          <p className="obs-empty">Start the backend on port 8000 (Vite proxies <code>/api</code> in dev). The dashboard reads the in-process store populated by <code>fanout()</code> after each chat turn.</p>
+        </section>
+      </div>
+    );
+  }
+
+  if (!snapshot) return null;
+
+  const turns = snapshot.totals.turns;
+  const allProbeIds = collectProbeIds(
+    ACTIVE_PROBES,
+    snapshot.health.trackers,
+    snapshot.trackers,
+    ...snapshot.confident_wrong.map((item) => item.trackers),
+  );
+  const visibleProbeIds = filterIds(allProbeIds);
+
   return (
     <div className="obs-page">
-      <div className="obs-status-bar">
-        {status === "loading" && <span className="obs-status-note">Connecting to backend&hellip;</span>}
-        {status === "error" && (
-          <span className="obs-status-note obs-status-error">Backend unreachable — showing demo data.</span>
-        )}
-        {status === "ok" && liveSnapshot && (
-          <span className="obs-status-note obs-status-ok">
-            Live &mdash; {liveSnapshot.totals.turns} turns, {(liveSnapshot.flag_rate * 100).toFixed(0)}% flagged
-          </span>
+      <div className="obs-head">
+        <h1>Observability</h1>
+        <span className="obs-head-status ok">
+          Live · {turns} turn{turns !== 1 ? "s" : ""} · {fmtPct(snapshot.flag_rate)} flagged
+        </span>
+        {snapshot.ts != null && (
+          <span className="obs-head-ts">last event {new Date(snapshot.ts * 1000).toLocaleTimeString()}</span>
         )}
         {evalResult && <span className="obs-eval-result">{evalResult}</span>}
       </div>
 
-      <TrackerStrip snapshot={snapshot} />
-      <ConfidentWrongFeed items={snapshot.confident_wrong} />
-      <FeatureLeaderboard snapshot={snapshot} />
+      <SystemHero health={snapshot.health} turns={turns} />
+      <KpiStrip snapshot={snapshot} />
+      <ProbeVisibilityPanel probeIds={allProbeIds} compact />
+
+      {turns === 0 && (
+        <p className="obs-hint">
+          Ledger is empty — infrastructure is wired and healthy. Send a message on <b>Chat</b> to record turns,
+          populate probe series, latency percentiles, and the feature leaderboard.
+        </p>
+      )}
+
+      <div className="obs-grid">
+        <TrackerStrip snapshot={snapshot} visibleIds={visibleProbeIds} />
+        <OverConfidenceTrend series={snapshot.uncertainty_series} />
+      </div>
+
+      <div className="obs-grid">
+        <ConfidentWrongFeed items={snapshot.confident_wrong} visibleIds={visibleProbeIds} />
+        <FeatureLeaderboard snapshot={snapshot} />
+      </div>
+
       <LatencyHealth snapshot={snapshot} onEval={handleEval} evalRunning={evalRunning} />
-      <PhoenixEmbed url={snapshot.phoenix_ui_url} />
-      <SentryStrip snapshot={snapshot} />
+
+      <div className="obs-grid">
+        <SentryPanel
+          snapshot={snapshot}
+          onTestAlarm={handleSentryTest}
+          testRunning={sentryTestRunning}
+          testResult={sentryTestResult}
+        />
+        <PhoenixPanel url={snapshot.phoenix_ui_url} />
+      </div>
     </div>
   );
 }

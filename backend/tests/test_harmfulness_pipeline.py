@@ -74,6 +74,47 @@ def test_run_pipeline_supports_normed_direction(tmp_path):
     assert len(updated["norm_std"]) == 3
 
 
+class LargeMagnitudeProvider:
+    """Activations on the scale of real residual streams (~1e3), where an uncalibrated
+    sigmoid(raw_proj) saturates to 0/1 — the bug we saw live on the pod."""
+
+    def activations(self, examples, *, layer):
+        rows = []
+        for i, ex in enumerate(examples):
+            s = 1.0 if ex.label == 1 else -1.0
+            rows.append([s * 3000.0 + (i % 3), s * 500.0, (i % 5) * 1.0])
+        return np.asarray(rows, dtype="float32")
+
+
+def test_pipeline_persists_calibration(tmp_path):
+    artifact = _artifact(tmp_path / "harmful.json")
+
+    hp.run_pipeline(artifact_path=artifact, layers=[17], provider=FakeActivationProvider(), min_auroc=0.8)
+    data = json.loads(artifact.read_text())
+
+    assert "projection_center" in data
+    assert data["projection_scale"] > 0  # register_tracker requires a positive scale
+
+
+def test_calibration_desaturates_large_magnitude_scores(tmp_path):
+    """End-to-end of the saturation fix: with real-scale activations, the persisted calibration
+    must yield graded scores (pos>0.5>neg, both strictly inside (0,1)) instead of pinning to 0/1."""
+    import torch
+
+    from backend.science import persona
+
+    artifact = _artifact(tmp_path / "harmful.json")
+    hp.run_pipeline(artifact_path=artifact, layers=[17], provider=LargeMagnitudeProvider(), min_auroc=0.8)
+
+    persona.clear_trackers()
+    persona.load_tracker_artifact(artifact)
+    pos = persona.score_all_trackers(None, torch.tensor([3000.0, 500.0, 0.0]))["harmful"]["score"]
+    neg = persona.score_all_trackers(None, torch.tensor([-3000.0, -500.0, 0.0]))["harmful"]["score"]
+    persona.clear_trackers()
+
+    assert 0.0 < neg < 0.5 < pos < 1.0
+
+
 def test_run_pipeline_sweeps_layers_and_writes_ready_artifact(tmp_path):
     artifact = _artifact(tmp_path / "harmful.json")
 

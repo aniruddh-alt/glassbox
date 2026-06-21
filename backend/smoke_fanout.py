@@ -49,6 +49,10 @@ def main() -> None:
         fanout.fanout(ev)
         print(f"emitted: flag={ev['flag']} uncertainty={ev['uncertainty']}")
 
+    if fanout.sentry_enabled():
+        import sentry_sdk
+        sentry_sdk.flush(timeout=3)
+
     time.sleep(3)  # let Phoenix's batched OTLP exporter flush before the process exits
     print("done — check Sentry Issues + Phoenix at http://localhost:6006")
 

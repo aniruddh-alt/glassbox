@@ -1,12 +1,12 @@
-// Frontend demo data + display metadata. NOT part of the contract (contract = schema.py/types.ts).
-// Lane C builds against this until /api/chat is live; flip useCognitionStream({mock:false}) to go real.
+// Frontend demo data. NOT part of the contract (contract = schema.py/types.ts).
 import type { CognitionEvent, Feature, ObservabilitySnapshot } from "./types";
+import { ACTIVE_PROBES, PROBE_META } from "./probes";
+
+export { PROBE_META } from "./probes";
 
 export const DEFAULT_CAVEAT = "auto-interp label, may be unreliable";
 const SUSPECT_CAVEAT = "likely mislabel — fires on unrelated tokens";
 
-// A feature is "suspect" (egregiously wrong label) when its caveat differs from the default.
-// Stays contract-clean: we read the existing `caveat` string, we don't add a field.
 export function isSuspect(f: Feature): boolean {
   return f.caveat !== DEFAULT_CAVEAT;
 }
@@ -16,7 +16,7 @@ const f = (index: number, label: string, act: number, suspect = false, tracked: 
   caveat: suspect ? SUSPECT_CAVEAT : DEFAULT_CAVEAT, tracked,
 });
 
-// The validated confident-wrong demo case (ibuprofen / 3rd trimester), in exact contract shape.
+// Ibuprofen / 3rd trimester confident-wrong case — uses the live probe pair only.
 export const DEMO_EVENT: CognitionEvent = {
   schema_version: "1.0",
   type: "event",
@@ -35,11 +35,8 @@ export const DEMO_EVENT: CognitionEvent = {
   flag: true,
   severity: "warning",
   trackers: {
-    uncertainty: { score: 0.83, proj: 1.27, flag: true, reliable: true, proj_pre: 0.91, alert_direction: "high", user_defined: false, status: "ready" },
-    hallucination: { score: 0.71, proj: 0.9, flag: true, reliable: true, alert_direction: "high", user_defined: false, status: "ready" },
-    harmful: { score: 0.09, proj: -0.4, flag: false, reliable: true, alert_direction: "high", user_defined: false, status: "ready" },
-    risk_awareness: { score: 0.22, proj: -1.1, flag: true, reliable: true, alert_direction: "low", user_defined: false, status: "ready" },
-    sycophancy: { score: 0.38, proj: 0.2, flag: false, reliable: true, alert_direction: "high", user_defined: false, status: "ready" },
+    harmful: { score: 0.91, proj: 1.4, flag: true, reliable: true, proj_pre: 0.6, alert_direction: "high", user_defined: false, status: "ready" },
+    over_confidence: { score: 0.83, proj: 1.27, flag: true, reliable: true, proj_pre: 0.91, alert_direction: "high", user_defined: false, status: "ready" },
   },
   features: [
     f(4412, "pregnancy & gestation", 6.2),
@@ -50,7 +47,7 @@ export const DEMO_EVENT: CognitionEvent = {
     f(11907, "clinical dosage", 3.8),
     f(333, "programming / code", 3.4, true),
     f(6650, "consulting a physician", 3.0),
-    f(8123, "hedging language", 2.6, false, "uncertainty"),
+    f(8123, "hedging language", 2.6),
     f(14002, "coffee / café", 2.1, true),
     f(512, "temporal periods", 1.8),
     f(10330, "safety & risk", 1.5),
@@ -60,57 +57,41 @@ export const DEMO_EVENT: CognitionEvent = {
   adjudication: {
     verdict: "likely_hallucinated",
     rationale:
-      "NSAIDs like ibuprofen are contraindicated in the third trimester (risk of premature ductus arteriosus closure and oligohydramnios). The model stated the opposite confidently, yet its uncertainty (0.83) and hallucination (0.71) probes both crossed threshold — the insides knew, the words didn't.",
+      "NSAIDs like ibuprofen are contraindicated in the third trimester. The model stated the opposite with unwarranted certainty — both the harmfulness and over-confidence probes crossed threshold.",
     by: "claude",
   },
 };
 
-// Static probe display metadata (AUROC + calibrated threshold). These are properties of the
-// trained probe, not of a message — so they live here, not on the per-event Tracker contract.
-// Real source for user-defined probes: GET /api/track/{id} (api.ts pollTracker returns auroc).
-export const PROBE_META: Record<string, { auroc: number; thr: number }> = {
-  uncertainty: { auroc: 0.94, thr: 0.55 },
-  hallucination: { auroc: 0.89, thr: 0.5 },
-  harmful: { auroc: 0.92, thr: 0.6 },
-  risk_awareness: { auroc: 0.88, thr: 0.35 },
-  sycophancy: { auroc: 0.81, thr: 0.6 },
-};
-
-// Mock for "define a probe in natural language" (real impl: api.ts track() + pollTracker()).
-// Honest: only over-confidence-type concepts flag; benign concepts resolve calm.
 export function mockDefine(concept: string): { score: number; thr: number; flag: boolean; auroc: number } {
-  const flagged = /over.?conf|overconf|bluff|hallucin|decept|reckless/i.test(concept);
+  const flagged = /over.?conf|overconf|harmful|unsafe|reckless/i.test(concept);
   const score = flagged ? 0.61 : 0.18 + Math.random() * 0.16;
   return { score, thr: 0.5, flag: score > 0.5, auroc: flagged ? 0.91 : 0.88 };
 }
 
-// Demo snapshot for ObservabilityPage — renders offline without /api/observability.
-// One tracker series, one confident_wrong with feature_labels only (no Q/A), 2 sentry issues.
 export const DEMO_OBSERVABILITY_SNAPSHOT: ObservabilitySnapshot = {
   ts: 1750000800.0,
   totals: { turns: 24, flags: 5 },
   flag_rate: 0.21,
   uncertainty_series: [0.12, 0.08, 0.41, 0.67, 0.22, 0.55, 0.83, 0.14, 0.38, 0.71],
   trackers: {
-    uncertainty: {
-      current: 0.71,
-      flag_count: 3,
-      series: [0.12, 0.08, 0.41, 0.67, 0.22, 0.55, 0.83, 0.14, 0.38, 0.71],
-    },
-    hallucination: {
+    harmful: {
       current: 0.58,
       flag_count: 2,
       series: [0.08, 0.12, 0.29, 0.51, 0.18, 0.44, 0.71, 0.11, 0.33, 0.58],
+    },
+    over_confidence: {
+      current: 0.71,
+      flag_count: 3,
+      series: [0.12, 0.08, 0.41, 0.67, 0.22, 0.55, 0.83, 0.14, 0.38, 0.71],
     },
   },
   confident_wrong: [
     {
       message_id: "m_12",
       ts: 1750000200.0,
-      uncertainty: 0.83,
       trackers: {
-        uncertainty: { score: 0.83, flag: true },
-        hallucination: { score: 0.71, flag: true },
+        harmful: { score: 0.91, flag: true },
+        over_confidence: { score: 0.83, flag: true },
       },
       feature_labels: ["anticoagulant dosing", "drug interaction risk", "clinical dosage"],
     },
@@ -120,8 +101,6 @@ export const DEMO_OBSERVABILITY_SNAPSHOT: ObservabilitySnapshot = {
     { label: "pregnancy & gestation", count: 6, mean_act: 1.74 },
     { label: "medication / drug safety", count: 5, mean_act: 1.61 },
     { label: "clinical dosage", count: 4, mean_act: 1.45 },
-    { label: "hedging language", count: 3, mean_act: 1.18 },
-    { label: "drug interaction risk", count: 3, mean_act: 1.09 },
   ],
   latency: {
     turn_ms: { p50: 820, p95: 1400, last: 910 },
@@ -141,33 +120,17 @@ export const DEMO_OBSERVABILITY_SNAPSHOT: ObservabilitySnapshot = {
     model: "unsloth/gemma-3-4b-it",
     layer: 17,
     d_sae: 16384,
-    trackers: ["uncertainty", "hallucination"],
+    trackers: [...ACTIVE_PROBES],
     sae_recon_cosine: 0.91,
     sae_recon_ok: true,
     pod_reachable: true,
     pod_url_configured: true,
   },
   sentry: {
+    emit_configured: true,
     configured: true,
     deep_link: "https://sentry.io/organizations/glassbox/issues/",
-    issues: [
-      {
-        shortId: "GLASSBOX-1",
-        title: "Confident-wrong medical answer",
-        level: "warning",
-        count: 14,
-        lastSeen: "2026-06-21T08:42:00Z",
-        permalink: "https://sentry.io/organizations/glassbox/issues/1/",
-      },
-      {
-        shortId: "GLASSBOX-2",
-        title: "Confident-wrong medical answer",
-        level: "warning",
-        count: 3,
-        lastSeen: "2026-06-21T06:15:00Z",
-        permalink: "https://sentry.io/organizations/glassbox/issues/2/",
-      },
-    ],
+    issues: [],
   },
   phoenix_ui_url: "http://localhost:6006",
 };

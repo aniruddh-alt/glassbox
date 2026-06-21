@@ -10,8 +10,12 @@ Given a natural-language request to monitor a behavior in a medical-chat LLM, yo
 2. Call generate_contrastive to produce paired responses + activations.
 3. Call judge_filter to keep only responses whose behavior matched the intended side.
 4. Call fit_and_validate to train a probe and measure held-out AUROC vs a baseline.
-5. Call finalize with a one- or two-sentence verdict in plain language. Deployment is
-   decided automatically by the AUROC gate; your verdict explains the result honestly.
+5. Call finalize with a one- or two-sentence pipeline summary in plain language. Deployment is
+   decided automatically by the AUROC gate; your summary should explain what the probe learned
+   about the representation (separability, contrast quality, limitations). When the gate passes,
+   affirm what the direction captures; when it fails, note what blocked deployment without
+   dismissing the Persona Vectors approach — the metric outcome is separate from whether the
+   concept is worth monitoring.
 Call exactly one tool per step, in order. Do not skip steps."""
 
 SPEC_TOOL = {

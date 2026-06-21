@@ -10,10 +10,13 @@ import pytest
 
 def _make_spans_df() -> pd.DataFrame:
     """Minimal realistic span DataFrame as would be returned by client.spans.get_spans_dataframe."""
+    # Mirrors the REAL shape from live Phoenix: context.span_id is a column AND the index, and the
+    # cognition attrs come back as ONE dict column `attributes.cognition` (NOT a flat
+    # attributes.cognition.feature_labels column — that flat-column mock previously masked two bugs).
     return pd.DataFrame(
         {
             "context.span_id": ["s1"],
-            "attributes.cognition.feature_labels": ['["dosing","python error"]'],
+            "attributes.cognition": [{"feature_labels": '["dosing","python error"]', "flag": True}],
             # Simulate extra columns that MUST NOT reach the LLM (privacy check)
             "attributes.input.value": ["PROMPT: patient question"],
             "attributes.output.value": ["RESPONSE: model answer"],
@@ -151,7 +154,7 @@ def test_run_eval_skips_already_annotated_spans(monkeypatch):
     df = pd.DataFrame(
         {
             "context.span_id": ["s1", "s2"],
-            "attributes.cognition.feature_labels": ['["dosing"]', '["anatomy"]'],
+            "attributes.cognition": [{"feature_labels": '["dosing"]'}, {"feature_labels": '["anatomy"]'}],
             "feature_coherence_label": ["on_domain", "on_domain"],  # already annotated
         }
     )

@@ -81,7 +81,6 @@ export interface ObsTrackerSeries {
 export interface ObsConfidentWrong {
   message_id: string;
   ts: number;
-  uncertainty: number | null;
   trackers: Record<string, { score: number; flag: boolean }>;
   feature_labels: string[];
 }
@@ -125,6 +124,7 @@ export interface ObsSentryIssue {
 }
 
 export interface ObsSentry {
+  emit_configured?: boolean;
   configured: boolean;
   deep_link: string | null;
   issues: ObsSentryIssue[];

@@ -15,8 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import config, labels, observability, runtime, sentry_api
 from .analyze import analyze_turn
-from .fanout import fanout, init_sponsors
-from .science import concept_synth as _cs
+from .fanout import fanout, init_sponsors, capture_cognition_alarm, sentry_enabled
 
 _TOKEN_CADENCE_S = 0.012  # replay the (already-generated) answer at a readable typing pace
 
@@ -54,6 +53,7 @@ async def observability_endpoint():
     snap = observability.STORE.snapshot()
     snap["health"] = runtime.health_payload()
     snap["sentry"] = {
+        "emit_configured": bool(config.SENTRY_DSN),
         "configured": bool(config.SENTRY_AUTH_TOKEN),
         "deep_link": sentry_api.deep_link(),
         "issues": await sentry_api.list_recent_issues(),
@@ -71,6 +71,46 @@ async def observability_eval():
     return await run_in_threadpool(coherence_eval.run_eval)
 
 
+@app.post("/api/observability/test-sentry")
+async def observability_test_sentry():
+    """Fire a synthetic flagged-turn alarm through Sentry (no GPU, no PHI).
+
+    Use this to verify SENTRY_DSN wiring. Real chat turns alarm automatically via fanout()
+    whenever any probe sets event.flag=true."""
+    import time
+    import uuid
+
+    if not sentry_enabled():
+        return JSONResponse(
+            {"ok": False, "reason": "SENTRY_DSN not configured — set it in .env and restart the backend."},
+            status_code=503,
+        )
+    message_id = f"test-{uuid.uuid4().hex[:8]}"
+    event = {
+        "message_id": message_id,
+        "ts": time.time(),
+        "model": "glassbox-test",
+        "layer": 17,
+        "flag": True,
+        "severity": "warning",
+        "uncertainty": 0.91,
+        "uncertainty_proj": 1.2,
+        "trackers": {
+            "over_confidence": {"score": 0.91, "proj": 1.2, "flag": True, "reliable": True},
+            "harmful": {"score": 0.12, "flag": False, "reliable": True},
+        },
+        "features": [{"index": 0, "label": "synthetic test alarm (no PHI)", "act": 1.0}],
+        "io": {"user_msg": "[synthetic test — not a real patient]", "response": "[synthetic test]"},
+    }
+    sent = capture_cognition_alarm(event, flush=True)
+    return {
+        "ok": sent,
+        "message_id": message_id,
+        "flag_reason": "over_confidence",
+        "hint": "Check Sentry Issues for “Confident-wrong medical answer”. Chat turns alarm the same way when a probe flags.",
+    }
+
+
 def _chunks(text: str) -> list[str]:
     """Split into word-with-trailing-space chunks for the streamed typing effect."""
     return re.findall(r"\S+\s*", text) or [text]
@@ -86,6 +126,12 @@ async def chat(body: dict):
     perf["t0_ns"] = turn_start_ns
     payload = event.model_dump()
 
+    # Record sponsors immediately — do not wait for the client to drain the NDJSON stream.
+    try:
+        fanout(payload, perf)
+    except Exception as e:  # never let a sponsor error break the response
+        print(f"[app] fanout failed: {e}")
+
     async def gen():
         for chunk in _chunks(answer):
             yield json.dumps(
@@ -93,10 +139,6 @@ async def chat(body: dict):
             ) + "\n"
             await asyncio.sleep(_TOKEN_CADENCE_S)
         yield json.dumps(payload) + "\n"
-        try:
-            fanout(payload, perf)
-        except Exception as e:  # never let a sponsor error break the completed stream
-            print(f"[app] fanout failed: {e}")
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
@@ -109,34 +151,31 @@ async def analyze(body: dict):
     return JSONResponse(event.model_dump())
 
 
-def _launch_agent(tracker_id: str) -> None:
-    """Run the blocking agent pipeline off the event loop."""
-    from .agent.interp_agent import run_interp_agent
-
-    def _run():
-        try:
-            run_interp_agent(tracker_id)
-        except Exception as e:  # noqa: BLE001 - surface failure in the job record
-            _cs.update_job(tracker_id, status="error", error=str(e))
-
-    asyncio.create_task(asyncio.to_thread(_run))
-
-
 @app.post("/api/track")
 async def track(body: dict):
-    """Submit a natural-language monitoring request. Returns immediately; runs in the bg."""
+    """Proxy an NL monitoring request to the GPU pod, which trains and registers the probe where
+    the model and live trackers live (gpu_service /api/track). Non-fatal: a missing or unreachable
+    pod returns an 'unavailable' status instead of crashing the request."""
+    from . import pod_client
+
     request = body.get("request") or body.get("concept") or body.get("name") or ""
-    tracker_id = _cs.create_job(request)
-    _launch_agent(tracker_id)
-    return {"tracker_id": tracker_id, "status": "pending"}
+    try:
+        return await run_in_threadpool(pod_client.track, request)
+    except Exception as e:  # noqa: BLE001 - pod down / not configured
+        print(f"[app] track proxy failed: {e}")
+        return JSONResponse({"status": "unavailable"}, status_code=503)
 
 
 @app.get("/api/track/{tracker_id}")
 async def track_status(tracker_id: str):
-    job = _cs.get_job(tracker_id)
-    if job is None:
-        return JSONResponse({"status": "unknown"}, status_code=404)
-    return job
+    """Proxy probe-job status from the pod."""
+    from . import pod_client
+
+    try:
+        return await run_in_threadpool(pod_client.track_status, tracker_id)
+    except Exception as e:  # noqa: BLE001 - pod down / not configured
+        print(f"[app] track_status proxy failed: {e}")
+        return JSONResponse({"status": "unavailable"}, status_code=503)
 
 
 @app.get("/api/feature/{index}")

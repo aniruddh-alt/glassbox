@@ -109,6 +109,44 @@ def _direction(X: np.ndarray, y: np.ndarray, *, method: str = "raw") -> dict:
     }
 
 
+def _project(X: np.ndarray, bundle: dict) -> np.ndarray:
+    """Project activations onto the unit direction, applying the bundle's z-scoring if present.
+    This is the exact scalar the runtime computes (persona.project), so AUROC and calibration
+    below are measured on the signal that actually ships."""
+    d = np.asarray(bundle["direction"], dtype="float64")
+    Xf = np.asarray(X, dtype="float64")
+    if bundle.get("norm_mean") is not None:
+        mu = np.asarray(bundle["norm_mean"], dtype="float64")
+        sd = np.asarray(bundle["norm_std"], dtype="float64")
+        Xf = (Xf - mu) / (sd + 1e-8)
+    return Xf @ d
+
+
+def _calibrate(proj_train: np.ndarray, y_train: np.ndarray) -> tuple[float, float, float]:
+    """Fit a 1-D logistic on the scalar projection so the runtime sigmoid is calibrated, not
+    saturated. Returns (projection_center, projection_scale, threshold) such that
+    score = sigmoid((proj - center)/scale) reproduces the fitted probability. Without this the
+    runtime falls back to sigmoid(raw_proj), which pins to 0/1 once projections are large."""
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import precision_recall_curve
+
+    p = np.asarray(proj_train, dtype="float64").reshape(-1, 1)
+    y = np.asarray(y_train, dtype="int64")
+    clf = LogisticRegression(class_weight="balanced", max_iter=1000).fit(p, y)
+    w = float(clf.coef_[0, 0])
+    b = float(clf.intercept_[0])
+    if w > 1e-8:
+        center, scale = -b / w, 1.0 / w
+    else:  # degenerate slope — z-score the projection so scores stay graded
+        center = float(p.mean())
+        scale = float(p.std()) or 1.0
+    probs = clf.predict_proba(p)[:, 1]
+    prec, rec, thr = precision_recall_curve(y, probs)
+    f1 = 2 * prec * rec / (prec + rec + 1e-8)
+    threshold = float(thr[max(0, f1[:-1].argmax())]) if len(thr) else 0.5
+    return center, scale, threshold
+
+
 def _split(examples: list[ProbeExample], X: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     y = np.asarray([ex.label for ex in examples], dtype="int64")
     train = np.asarray([ex.split == "train" for ex in examples], dtype=bool)
@@ -125,16 +163,16 @@ def train_layer(
     layer: int,
     direction_method: str = "raw",
 ) -> dict:
-    """Train/evaluate one layer and return metrics plus the learned direction."""
+    """Train/evaluate one layer and return metrics plus the learned direction.
+
+    AUROC measures the DIRECTION's own projection (the signal the runtime deploys), not a separate
+    multi-dim classifier — that's the honest score for 'pick the vector with the best AUROC'.
+    Calibration params are fit on the train-fold projections so runtime scores are graded."""
     from sklearn.metrics import roc_auc_score
 
     X_train, y_train, X_test, y_test = _split(examples, X)
-    clf, threshold = persona.train_probe(X_train, y_train)
-    proba = clf.predict_proba(X_test)[:, 1]
-    auroc = float(roc_auc_score(y_test, proba))
     try:
         bundle = _direction(X_train, y_train, method=direction_method)
-        direction = bundle["direction"].tolist()
     except ValueError:
         bundle = {
             "direction_method": "raw_diff_of_means",
@@ -142,12 +180,22 @@ def train_layer(
             "norm_mean": None,
             "norm_std": None,
         }
-        direction = bundle["direction"].tolist()
+
+    proj_train = _project(X_train, bundle)
+    proj_test = _project(X_test, bundle)
+    try:
+        auroc = float(roc_auc_score(y_test, proj_test))
+    except ValueError:  # single-class test fold
+        auroc = 0.5
+    center, scale, threshold = _calibrate(proj_train, y_train)
+
     out = {
         "layer": int(layer),
         "auroc": auroc,
         "threshold": float(threshold),
-        "direction": direction,
+        "projection_center": float(center),
+        "projection_scale": float(scale),
+        "direction": np.asarray(bundle["direction"]).tolist(),
         "direction_method": bundle["direction_method"],
         "n_train": int(len(y_train)),
         "n_test": int(len(y_test)),
@@ -198,6 +246,8 @@ def write_ready_artifact(
     artifact["layer"] = best["layer"]
     artifact["auroc"] = best["auroc"]
     artifact["direction_method"] = best.get("direction_method", "raw_diff_of_means")
+    artifact["projection_center"] = best["projection_center"]
+    artifact["projection_scale"] = best["projection_scale"]
     if best.get("norm_mean") is not None:
         artifact["norm_mean"] = best["norm_mean"]
         artifact["norm_std"] = best["norm_std"]

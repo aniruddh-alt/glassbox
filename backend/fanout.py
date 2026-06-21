@@ -139,44 +139,70 @@ def _bucket(u):
     return "high" if (u or 0) >= 0.66 else "med" if (u or 0) >= 0.33 else "low"
 
 
+def _observable_trackers(trackers: dict | None) -> dict:
+    return {tid: tr for tid, tr in (trackers or {}).items() if tid not in config.DISABLED_TRACKERS}
+
+
+_FLAG_PRIORITY = ("harmful", "harmful_prompt", "over_confidence")
+
+
 def _flag_reason(event: dict) -> str:
     """Sentry grouping key = which reliable probe fired, so distinct failure modes become
     distinct Issues (a harmful answer and a hallucinated one are triaged differently)."""
-    trackers = event.get("trackers") or {}
-    for tid in ("harmful", "hallucination"):  # priority order — most severe first
-        t = trackers.get(tid)
-        if t and t.get("flag"):
+    trackers = _observable_trackers(event.get("trackers"))
+    for tid in _FLAG_PRIORITY:
+        if trackers.get(tid, {}).get("flag"):
+            return tid
+    for tid, t in trackers.items():
+        if t.get("flag"):
             return tid
     return "confident_wrong"
+
+
+def sentry_enabled() -> bool:
+    return _sentry_on
+
+
+def capture_cognition_alarm(event: dict, *, flush: bool = False) -> bool:
+    """Emit a PII-free Sentry issue when ``event['flag']`` is true.
+
+    Called automatically by ``fanout()`` for every chat turn. Use directly for tests or
+    custom hooks. Returns True when a message was queued for Sentry."""
+    if not _sentry_on or not event.get("flag"):
+        return False
+    import sentry_sdk
+
+    reason = _flag_reason(event)
+    cognition = {
+        "uncertainty": event.get("uncertainty"),
+        "uncertainty_proj": event.get("uncertainty_proj"),
+        "trackers": _observable_trackers(event.get("trackers")),
+        "top_features": [f["label"] for f in event.get("features", [])],
+    }
+    if config.SENTRY_SEND_IO:
+        io = event.get("io") or {}
+        cognition["question"] = _scrub(io.get("user_msg", "") or "")
+        cognition["answer"] = _scrub(io.get("response", "") or "")
+    with sentry_sdk.new_scope() as scope:
+        scope.fingerprint = ["glassbox", "medical-cognition", reason]
+        scope.set_tag("model", event.get("model"))
+        scope.set_tag("event_type", "confident_wrong")
+        scope.set_tag("flag_reason", reason)
+        scope.set_tag("message_id", event.get("message_id"))
+        scope.set_tag("uncertainty_bucket", _bucket(event.get("uncertainty")))
+        scope.set_context("cognition", cognition)
+        sentry_sdk.capture_message(
+            "Confident-wrong medical answer", level=_level(event.get("severity", "warning"))
+        )
+    if flush:
+        sentry_sdk.flush(timeout=3)
+    return True
 
 
 class SentrySink:
     name = "sentry"
     def emit(self, event: dict, perf: dict | None = None) -> None:
-        if not _sentry_on or not event.get("flag"):   # QUIET: only flagged turns alarm
-            return
-        import sentry_sdk
-        reason = _flag_reason(event)
-        cognition = {        # default: PII-FREE (labels + scores only)
-            "uncertainty": event.get("uncertainty"),
-            "uncertainty_proj": event.get("uncertainty_proj"),
-            "trackers": event.get("trackers", {}),
-            "top_features": [f["label"] for f in event.get("features", [])],
-        }
-        if config.SENTRY_SEND_IO:   # opt-in PHI gate (default OFF); regex-scrubbed here + in before_send
-            io = event.get("io") or {}
-            cognition["question"] = _scrub(io.get("user_msg", "") or "")
-            cognition["answer"] = _scrub(io.get("response", "") or "")
-        with sentry_sdk.new_scope() as scope:
-            scope.fingerprint = ["glassbox", "medical-cognition", reason]
-            scope.set_tag("model", event.get("model"))
-            scope.set_tag("event_type", "confident_wrong")
-            scope.set_tag("flag_reason", reason)
-            scope.set_tag("uncertainty_bucket", _bucket(event.get("uncertainty")))
-            scope.set_context("cognition", cognition)
-            sentry_sdk.capture_message(
-                "Confident-wrong medical answer", level=_level(event.get("severity", "warning"))
-            )
+        capture_cognition_alarm(event)
 
 
 # ---------------------------------------------------------------------------
