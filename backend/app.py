@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import config, labels, observability, runtime, sentry_api
 from .analyze import analyze_turn
-from .fanout import fanout, init_sponsors
+from .fanout import fanout, init_sponsors, capture_cognition_alarm, sentry_enabled
 
 _TOKEN_CADENCE_S = 0.012  # replay the (already-generated) answer at a readable typing pace
 
@@ -53,6 +53,7 @@ async def observability_endpoint():
     snap = observability.STORE.snapshot()
     snap["health"] = runtime.health_payload()
     snap["sentry"] = {
+        "emit_configured": bool(config.SENTRY_DSN),
         "configured": bool(config.SENTRY_AUTH_TOKEN),
         "deep_link": sentry_api.deep_link(),
         "issues": await sentry_api.list_recent_issues(),
@@ -70,6 +71,46 @@ async def observability_eval():
     return await run_in_threadpool(coherence_eval.run_eval)
 
 
+@app.post("/api/observability/test-sentry")
+async def observability_test_sentry():
+    """Fire a synthetic flagged-turn alarm through Sentry (no GPU, no PHI).
+
+    Use this to verify SENTRY_DSN wiring. Real chat turns alarm automatically via fanout()
+    whenever any probe sets event.flag=true."""
+    import time
+    import uuid
+
+    if not sentry_enabled():
+        return JSONResponse(
+            {"ok": False, "reason": "SENTRY_DSN not configured — set it in .env and restart the backend."},
+            status_code=503,
+        )
+    message_id = f"test-{uuid.uuid4().hex[:8]}"
+    event = {
+        "message_id": message_id,
+        "ts": time.time(),
+        "model": "glassbox-test",
+        "layer": 17,
+        "flag": True,
+        "severity": "warning",
+        "uncertainty": 0.91,
+        "uncertainty_proj": 1.2,
+        "trackers": {
+            "over_confidence": {"score": 0.91, "proj": 1.2, "flag": True, "reliable": True},
+            "harmful": {"score": 0.12, "flag": False, "reliable": True},
+        },
+        "features": [{"index": 0, "label": "synthetic test alarm (no PHI)", "act": 1.0}],
+        "io": {"user_msg": "[synthetic test — not a real patient]", "response": "[synthetic test]"},
+    }
+    sent = capture_cognition_alarm(event, flush=True)
+    return {
+        "ok": sent,
+        "message_id": message_id,
+        "flag_reason": "over_confidence",
+        "hint": "Check Sentry Issues for “Confident-wrong medical answer”. Chat turns alarm the same way when a probe flags.",
+    }
+
+
 def _chunks(text: str) -> list[str]:
     """Split into word-with-trailing-space chunks for the streamed typing effect."""
     return re.findall(r"\S+\s*", text) or [text]
@@ -85,6 +126,12 @@ async def chat(body: dict):
     perf["t0_ns"] = turn_start_ns
     payload = event.model_dump()
 
+    # Record sponsors immediately — do not wait for the client to drain the NDJSON stream.
+    try:
+        fanout(payload, perf)
+    except Exception as e:  # never let a sponsor error break the response
+        print(f"[app] fanout failed: {e}")
+
     async def gen():
         for chunk in _chunks(answer):
             yield json.dumps(
@@ -92,10 +139,6 @@ async def chat(body: dict):
             ) + "\n"
             await asyncio.sleep(_TOKEN_CADENCE_S)
         yield json.dumps(payload) + "\n"
-        try:
-            fanout(payload, perf)
-        except Exception as e:  # never let a sponsor error break the completed stream
-            print(f"[app] fanout failed: {e}")
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 

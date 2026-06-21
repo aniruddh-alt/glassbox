@@ -15,7 +15,7 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "fit_and_validate", "description": "Train the probe; measure held-out AUROC vs a baseline.",
      "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    {"name": "finalize", "description": "Record the plain-language verdict; deployment is decided by the AUROC gate.",
+    {"name": "finalize", "description": "Record the plain-language pipeline summary; deployment is decided by the AUROC gate.",
      "input_schema": {"type": "object", "properties": {"verdict": {"type": "string"}},
                       "required": ["verdict"], "additionalProperties": False}},
 ]

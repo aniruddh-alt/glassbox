@@ -5,6 +5,31 @@
 > UC Berkeley AI Hackathon · 24h · 3 lanes (A-Backend / B-Science / C-Frontend)
 > **Surface uncertainty, never suppress it.**
 
+Licensed under [MIT](LICENSE).
+
+---
+
+## Hackathon demo (5 minutes)
+
+**Three tabs:** Chat · Build · Observe
+
+| Tab | What to show |
+|-----|----------------|
+| **Chat** | Medical Q&A with live SAE feature cloud + **harmful** and **over-confidence** probe meters |
+| **Build** | Natural-language probe builder — Claude designs a trait, Gemma generates contrastive pairs, a calibrated probe deploys live |
+| **Observe** | Phoenix traces, Sentry alarms, KPI strip, probe score trends |
+
+**Tier A — no GPU (works everywhere):** `uv sync` + frontend dev server → backend runs in **fallback mode** with synthetic features. Good for UI walkthrough.
+
+**Tier B — full stack:** Anthropic API key + GPU pod running `gpu_service` (see `docs/tailscale-pod-runbook.md`). Enables real activations, live probes, and the Build pipeline.
+
+```bash
+cp .env.example .env   # ANTHROPIC_API_KEY required for Build + labels
+uv sync && uv run uvicorn backend.app:app --port 8000
+cd frontend && npm install && npm run dev
+# open http://localhost:5173
+```
+
 ---
 
 ## The one-paragraph architecture
@@ -12,7 +37,7 @@
 A clinician chats with `unsloth/gemma-3-4b-it` over **POST + NDJSON** (never SSE — it breaks through Cloudflare). On the GPU, the model generates while **one forward hook on `model.model.layers[17]`** captures the residual stream. That single activation feeds **two method families**:
 
 - **Family A — SAE feature cloud** (Gemma Scope `layer_17/width_16k`): top-k firing features → the exploratory "what's lighting up" view. *Labels are auto-interp and unreliable — always shown with caveats.*
-- **Family B — persona-vector probes** (diff-of-means + calibrated logistic regression at layer 17): the **reliable** uncertainty / harmful / hallucination scores, plus **user-defined concepts** computed on demand. *(In progress — scores emit `null` until probes are trained.)*
+- **Family B — persona-vector probes** (diff-of-means + calibrated logistic regression at layer 17): calibrated **harmful** and **over-confidence** scores, plus **user-defined probes** built on the Build tab (`POST /api/track` → interpretability agent on the GPU pod).
 
 Downstream on **CPU**, the FastAPI handler assembles **exactly one `cognition_event`** per message and fans it out to four consumers that never touch the GPU: **Sentry** (Issue), **Arize Phoenix** (span + eval), the **chat UI**, and **Claude** (auto-interp labels + async adjudication of flagged events).
 

@@ -67,7 +67,7 @@ def _attempt_load() -> None:
         STATE["model_loaded"] = True
         sae.load_sae()
         STATE["sae_loaded"] = True
-        loaded = persona.load_artifacts(exclude=config.DISABLED_TRACKERS)
+        loaded = persona.load_artifacts(include=config.ENABLED_TRACKERS)
         if loaded:
             print(f"[gpu_service] loaded probe trackers: {', '.join(loaded)}")
         STATE["mode"] = "real"

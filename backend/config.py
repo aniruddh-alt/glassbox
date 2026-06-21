@@ -4,6 +4,16 @@ from __future__ import annotations
 
 import os
 
+# Load a gitignored repo-root .env (if present) so local secrets — Sentry token/DSN, pod creds —
+# stay out of source. Real environment variables still take precedence (load_dotenv won't override).
+try:
+    from pathlib import Path as _Path
+    from dotenv import load_dotenv as _load_dotenv
+
+    _load_dotenv(_Path(__file__).resolve().parent.parent / ".env")
+except Exception:  # python-dotenv optional; absence just means no .env convenience
+    pass
+
 MODEL_ID = os.getenv("MODEL_ID", "unsloth/gemma-3-4b-it")
 LAYER = int(os.getenv("LAYER", "17"))
 SAE_LAYERS = [9, 17, 22, 29]
@@ -78,13 +88,16 @@ AUTOINTERP_MODEL = os.getenv("AUTOINTERP_MODEL", "claude-haiku-4-5")  # cheap, o
 # feature can be rarer than a dense structural one). 1.0 = disable.
 STRUCTURAL_PENALTY = float(os.getenv("STRUCTURAL_PENALTY", "0.15"))
 
-BUILTIN_TRACKERS = ["uncertainty", "harmful", "hallucination"]
+# Live probe set — ONLY these artifacts load at GPU service startup (persona.load_artifacts).
+# Trained artifacts for deprecated probes stay on disk but are excluded via DISABLED_TRACKERS.
+ENABLED_TRACKERS = frozenset({"harmful", "over_confidence", "harmful_prompt"})
+BUILTIN_TRACKERS = sorted(ENABLED_TRACKERS)  # alias for scripts/docs
+
 DEFAULT_THRESHOLD = 0.5
 
-# Probes whose artifacts stay on disk but are NOT loaded at startup. risk_awareness was dropped:
-# its low-direction signal read 0.00 / always-flagged in practice, so it added noise without signal.
-# Re-enable by removing the id here (the trained artifact is untouched in science/artifacts/).
-DISABLED_TRACKERS = {"risk_awareness"}
+# On-disk artifacts that are NOT loaded. Keeps hallucination/uncertainty/risk_awareness
+# available for re-training without surfacing them in /health or /turn scores.
+DISABLED_TRACKERS = frozenset({"uncertainty", "hallucination", "risk_awareness"})
 
 # --- GPU pod (orchestration → remote torch service) ---
 # Defaults wire to the local SSH tunnel (scripts/tunnel_pod.sh → localhost:8001) so the backend

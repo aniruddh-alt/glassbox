@@ -118,6 +118,29 @@ def info() -> dict:
     }
 
 
+def _acts_for_sequence(out) -> "torch.Tensor":
+    """Return layer-LAYER resid_post for every token in `out`, shape [seq, d_in].
+
+    Autoregressive generate() only leaves the hook holding the last decode step
+    ([1, 1, d_in]). A full-sequence forward is required before indexing by
+    resp_start. Also re-runs when attribution left a shorter capture."""
+    import torch
+
+    seq_len = int(out.shape[1])
+    stored = _cap.get("act")
+    if stored is not None and stored.shape[1] >= seq_len:
+        return stored[0]
+    with torch.no_grad():
+        _model(input_ids=out, use_cache=False)
+    stored = _cap.get("act")
+    if stored is None or stored.shape[1] < seq_len:
+        got = 0 if stored is None else int(stored.shape[1])
+        raise RuntimeError(
+            f"activation capture length mismatch: need {seq_len} positions, hook saw {got}"
+        )
+    return stored[0]
+
+
 def generate_and_capture(
     messages: list[dict], max_new: int = 48, *, attribution: bool | None = None
 ) -> dict:
@@ -152,13 +175,11 @@ def generate_and_capture(
         except Exception as e:  # noqa: BLE001 — never break a turn; fall back to activation ranking
             print(f"[engine] attribution backward failed ({e}); using activation ranking")
             grad = None
-    if grad is None:
-        with torch.no_grad():
-            _model(input_ids=out)  # post-hoc full forward -> _cap holds detached [1, seq, d_in]
+    acts = _acts_for_sequence(out)
 
     return {
         "answer": answer,
-        "acts": _cap["act"][0],
+        "acts": acts,
         "grad": grad,
         "out_ids": out[0],
         "resp_start": resp_start,

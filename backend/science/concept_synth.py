@@ -100,7 +100,12 @@ def generate_contrastive(spec: dict, *, generate_fn=None, max_new: int = 64) -> 
     if generate_fn is None:
         from .. import engine
 
-        generate_fn = engine.generate_and_capture
+        def generate_fn(messages, max_new=max_new):
+            # Probe training pools response-mean activations; skip attribution (same as
+            # harmfulness_pipeline) so we always take the full-sequence capture path.
+            return engine.generate_and_capture(
+                messages, max_new=max_new, attribution=False
+            )
 
     rows: list[dict] = []
     for label, prompt in ((1, spec["pos_prompt"]), (0, spec["neg_prompt"])):

@@ -17,6 +17,9 @@ from typing import Any
 _trackers: dict[str, dict] = {}
 ARTIFACT_DIR = Path(__file__).with_name("artifacts")
 _ALERT_DIRECTIONS = {"high", "low"}
+# Which activation a tracker scores: the response-token mean (model output harm) or the
+# last-prompt-token activation (harmful *intent* in the user's question, before the model answers).
+_SCORE_INPUTS = {"prompt", "response"}
 
 
 def persona_vector(act_pos, act_neg):
@@ -80,13 +83,15 @@ def register_tracker(
     norm_mean=None,
     norm_std=None,
     direction_method: str | None = None,
+    scores_on: str = "response",
 ) -> dict:
     """Register a ready persona-vector tracker.
 
     `score` is always a bounded probability-like value in [0, 1]. If no calibrated classifier is
     available, the raw vector projection stays in `proj` and `score` is a sigmoid of that
     projection. `alert_direction="low"` is for protective concepts such as risk awareness, where
-    low activation should raise the monitor flag.
+    low activation should raise the monitor flag. `scores_on="prompt"` scores the last-prompt-token
+    activation (harmful intent in the question) instead of the response-token mean.
     """
     tid = tracker_id.strip()
     if not tid:
@@ -95,6 +100,8 @@ def register_tracker(
         raise ValueError("threshold must be in [0, 1]")
     if alert_direction not in _ALERT_DIRECTIONS:
         raise ValueError(f"alert_direction must be one of {sorted(_ALERT_DIRECTIONS)}")
+    if scores_on not in _SCORE_INPUTS:
+        raise ValueError(f"scores_on must be one of {sorted(_SCORE_INPUTS)}")
     if projection_scale <= 0:
         raise ValueError("projection_scale must be > 0")
 
@@ -109,6 +116,7 @@ def register_tracker(
         "norm_mean": _as_tensor(norm_mean) if norm_mean is not None else None,
         "norm_std": _as_tensor(norm_std) if norm_std is not None else None,
         "direction_method": direction_method,
+        "scores_on": scores_on,
     }
     _trackers[tid] = tracker
     return tracker
@@ -149,6 +157,7 @@ def load_tracker_artifact(path: str | Path) -> str | None:
         norm_mean=data.get("norm_mean"),
         norm_std=data.get("norm_std"),
         direction_method=data.get("direction_method"),
+        scores_on=data.get("input") or data.get("scores_on") or "response",
     )
     return str(tid)
 
@@ -156,19 +165,24 @@ def load_tracker_artifact(path: str | Path) -> str | None:
 def load_artifacts(
     artifact_dir: str | Path = ARTIFACT_DIR,
     exclude: Iterable[str] = (),
+    include: Iterable[str] | None = None,
 ) -> list[str]:
-    """Load all ready tracker artifacts from a directory.
+    """Load ready tracker artifacts from a directory.
 
-    `exclude` skips artifacts by id (filename stem) — used to keep a trained probe on disk
-    while leaving it out of the live tracker set.
+    `include` — when set, only these ids (filename stems) are loaded.
+    `exclude` — skip these ids even if they would otherwise match `include`.
     """
     root = Path(artifact_dir)
     if not root.exists():
         return []
     skip = set(exclude)
+    allow = set(include) if include is not None else None
     loaded: list[str] = []
     for path in sorted(root.glob("*.json")):
-        if path.stem in skip:
+        stem = path.stem
+        if stem in skip:
+            continue
+        if allow is not None and stem not in allow:
             continue
         tid = load_tracker_artifact(path)
         if tid:
@@ -200,31 +214,32 @@ def train_probe(X, y):
 
 
 def score_all_trackers(act_last, act_resp) -> dict[str, dict]:
-    """act_last: last-prompt-token activation (pre-gen early warning).
+    """act_last: last-prompt-token activation (the prompt / pre-gen signal).
     act_resp: response-token-average activation.
-    Returns {tracker_id -> {score, proj, proj_pre, flag, reliable, status, user_defined}}.
+    Each tracker scores the activation named by its `scores_on` ("response" default, or "prompt"
+    for harmful-intent probes). `proj` is always the response projection and `proj_pre` the prompt
+    projection (for display); `score` derives from whichever the tracker scores on.
+    Returns {tracker_id -> {score, proj, proj_pre, flag, reliable, status, user_defined, scores_on}}.
     """
     out: dict[str, dict] = {}
-    if act_resp is None:
-        return out
-
     for tid, t in _trackers.items():
+        scores_on = t.get("scores_on", "response")
+        score_act = act_last if scores_on == "prompt" else act_resp
+        if score_act is None:
+            continue  # this turn lacks the activation this tracker scores on
         try:
             nm, ns = t.get("norm_mean"), t.get("norm_std")
-            proj = float(project(act_resp, t["dir"], norm_mean=nm, norm_std=ns))
-            proj_pre = (
-                float(project(act_last, t["dir"], norm_mean=nm, norm_std=ns))
-                if act_last is not None
-                else None
-            )
+            proj = float(project(act_resp, t["dir"], norm_mean=nm, norm_std=ns)) if act_resp is not None else None
+            proj_pre = float(project(act_last, t["dir"], norm_mean=nm, norm_std=ns)) if act_last is not None else None
         except Exception as e:  # noqa: BLE001 - one malformed artifact must not fail the turn
             print(f"[persona] skipping tracker {tid}: {e}")
             continue
+        score_proj = proj_pre if scores_on == "prompt" else proj
         clf = t.get("calibrator")
         if clf:
-            score = float(clf.predict_proba(_as_numpy_row(act_resp))[:, 1][0])
+            score = float(clf.predict_proba(_as_numpy_row(score_act))[:, 1][0])
         else:
-            z = (proj - t.get("projection_center", 0.0)) / t.get("projection_scale", 1.0)
+            z = (score_proj - t.get("projection_center", 0.0)) / t.get("projection_scale", 1.0)
             z = max(-60.0, min(60.0, z))
             score = 1.0 / (1.0 + math.exp(-z))
         threshold = t.get("threshold", 0.5)
@@ -239,5 +254,6 @@ def score_all_trackers(act_last, act_resp) -> dict[str, dict]:
             "status": "ready",
             "user_defined": t.get("meta", {}).get("user_defined", False),
             "alert_direction": alert_direction,
+            "scores_on": scores_on,
         }
     return out

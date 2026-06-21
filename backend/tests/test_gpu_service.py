@@ -34,7 +34,10 @@ def _install_stubs(monkeypatch):
             {"index": 42, "act": 1.0, "attr": 0.5, "source": "s"}
         ],
     )
-    monkeypatch.setattr(gpu_service, "_score_trackers", lambda a, b: {"uncertainty": {"score": 0.1}})
+    monkeypatch.setattr(gpu_service, "_score_trackers", lambda a, b: {
+        "harmful": {"score": 0.1, "flag": False},
+        "over_confidence": {"score": 0.2, "flag": False},
+    })
 
 
 def test_health_shape():
@@ -83,7 +86,8 @@ def test_turn_composes_candidates_and_trackers(monkeypatch):
     body = r.json()
     assert body["answer"] == "fake answer"
     assert body["candidates"][0]["index"] == 42
-    assert "uncertainty" in body["trackers"]
+    assert "harmful" in body["trackers"]
+    assert "over_confidence" in body["trackers"]
     assert body["reliable"] is True
 
 

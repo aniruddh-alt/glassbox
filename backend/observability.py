@@ -4,7 +4,14 @@ Lane A — never imports torch. Prompt/response (io.*) are NEVER read here."""
 from __future__ import annotations
 from collections import deque
 
+from .config import DISABLED_TRACKERS
+
 _TRACKER_KEYS = ("score", "proj", "proj_pre", "flag", "reliable", "user_defined", "status")
+
+
+def _observable_trackers(trackers: dict | None) -> dict:
+    """Drop deprecated artifacts; keep enabled builtins and deployed custom probes."""
+    return {tid: tr for tid, tr in (trackers or {}).items() if tid not in DISABLED_TRACKERS}
 
 def to_redacted_view(event: dict) -> dict:
     """ALLOW-LIST projection → de-identified view. io.* and adjudication.rationale are never copied,
@@ -18,7 +25,7 @@ def to_redacted_view(event: dict) -> dict:
         "uncertainty_proj_pre": event.get("uncertainty_proj_pre"),
         "flag": event.get("flag", False), "severity": event.get("severity", "info"),
         "trackers": {tid: {k: tr.get(k) for k in _TRACKER_KEYS}
-                     for tid, tr in (event.get("trackers") or {}).items()},
+                     for tid, tr in _observable_trackers(event.get("trackers")).items()},
         "features": [{"index": f["index"], "label": f["label"], "act": f.get("act"),
                       "source": f.get("source"), "tracked": f.get("tracked")}
                      for f in (event.get("features") or [])],
@@ -45,12 +52,12 @@ class ObservabilityStore:
         unc = [v["uncertainty"] for v in views if v.get("uncertainty") is not None]
         flags = [v for v in views if v.get("flag")]
         # per-tracker series (bounded by deque; absent → skipped)
-        tracker_ids = {tid for v in views for tid in (v.get("trackers") or {})}
+        tracker_ids = {tid for v in views for tid in _observable_trackers(v.get("trackers"))}
         trackers = {}
         for tid in tracker_ids:
-            series = [v["trackers"][tid]["score"] for v in views if tid in (v.get("trackers") or {})]
+            series = [v["trackers"][tid]["score"] for v in views if tid in _observable_trackers(v.get("trackers"))]
             trackers[tid] = {"current": series[-1] if series else None,
-                             "flag_count": sum(1 for v in views if (v.get("trackers") or {}).get(tid, {}).get("flag")),
+                             "flag_count": sum(1 for v in views if _observable_trackers(v.get("trackers")).get(tid, {}).get("flag")),
                              "series": series}
         # feature leaderboard
         feat = {}
@@ -75,8 +82,8 @@ class ObservabilityStore:
         latency = {"turn_ms": {"p50": _pct(turn_ms, 50), "p95": _pct(turn_ms, 95),
                                "last": turn_ms[-1] if turn_ms else None},
                    "stages": {n: {"p50": _pct(vs, 50)} for n, vs in stages.items()}}
-        cw = [{"message_id": v["message_id"], "ts": v["ts"], "uncertainty": v.get("uncertainty"),
-               "trackers": v.get("trackers", {}),
+        cw = [{"message_id": v["message_id"], "ts": v["ts"],
+               "trackers": _observable_trackers(v.get("trackers")),
                "feature_labels": [f["label"] for f in v.get("features") or []]} for v in flags]
         return {"ts": views[-1]["ts"] if views else None,
                 "totals": {"turns": len(views), "flags": len(flags)},

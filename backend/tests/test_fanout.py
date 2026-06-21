@@ -83,6 +83,21 @@ def test_phoenix_sink_redacts_and_builds_waterfall(monkeypatch):
     assert all_attrs["cognition.feature_labels"] == '["dosing"]'
 
 
+def test_flag_reason_prefers_severity_order():
+    from backend.fanout import _flag_reason
+    ev = {"trackers": {
+        "over_confidence": {"flag": True},
+        "harmful": {"flag": True},
+        "uncertainty": {"flag": True},
+        "sycophancy": {"flag": True},
+    }}
+    assert _flag_reason(ev) == "harmful"
+    ev2 = {"trackers": {"over_confidence": {"flag": True}, "sycophancy": {"flag": True}}}
+    assert _flag_reason(ev2) == "over_confidence"
+    ev3 = {"trackers": {"uncertainty": {"flag": True}, "sycophancy": {"flag": True}}}
+    assert _flag_reason(ev3) == "sycophancy"
+
+
 def test_sentry_sink_quiet_on_unflagged_and_redacted_on_flag(monkeypatch):
     import backend.fanout as fo
     captured = {}

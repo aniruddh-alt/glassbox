@@ -46,3 +46,17 @@ export function runEval(): Promise<{ evaluated: number; off_domain: number } | {
     return r.json();
   });
 }
+
+export function testSentryAlarm(): Promise<{
+  ok: boolean;
+  message_id?: string;
+  flag_reason?: string;
+  hint?: string;
+  reason?: string;
+}> {
+  return fetch("/api/observability/test-sentry", { method: "POST" }).then(async (r) => {
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.reason ?? `POST /api/observability/test-sentry -> ${r.status}`);
+    return body;
+  });
+}

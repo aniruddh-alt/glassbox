@@ -28,6 +28,24 @@ def test_generate_contrastive_emits_two_rows_per_question():
     assert all(r["act_last"].shape[0] == 2560 for r in rows)
 
 
+def test_generate_contrastive_disables_attribution():
+    captured = []
+
+    def spy(messages, max_new=64, attribution=None):
+        captured.append(attribution)
+        return _fake_generate(messages, max_new)
+
+    import backend.engine as engine
+
+    original = engine.generate_and_capture
+    engine.generate_and_capture = spy
+    try:
+        cs.generate_contrastive(SPEC)
+    finally:
+        engine.generate_and_capture = original
+    assert captured and all(a is False for a in captured)
+
+
 def test_generate_prepends_system_into_user_turn():
     captured = []
 

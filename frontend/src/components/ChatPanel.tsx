@@ -86,15 +86,14 @@ function MarkdownText({ text }: { text: string }) {
 }
 
 export function ChatPanel({
-  thread, pending, status, modelName, onSend,
+  thread, pending, status, onSend,
 }: {
   thread: Msg[];
   pending: string | null;            // the in-progress assistant text while streaming
   status: "idle" | "streaming" | "done" | "error";
-  modelName: string;
   onSend: (content: string) => void;
 }) {
-  const [draft, setDraft] = useState("Is ibuprofen safe to take in the third trimester of pregnancy?");
+  const [draft, setDraft] = useState("");
   const threadRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const streaming = status === "streaming";
@@ -118,14 +117,11 @@ export function ChatPanel({
     setDraft("");
   }
 
-  const who = (role: Msg["role"]) => (role === "user" ? "clinician" : modelName);
+  const who = (role: Msg["role"]) => (role === "user" ? "user" : "assistant");
 
   return (
     <section className="chat glass">
       <div className="thread" ref={threadRef}>
-        {thread.length === 0 && !pending && (
-          <div className="empty">Ask a clinical question to watch the model's features fire.</div>
-        )}
         {thread.map((m, i) => (
           <div key={i} className={`msg ${m.role === "user" ? "user" : "bot"}`}>
             <span className="who">{who(m.role)}</span>
@@ -134,7 +130,7 @@ export function ChatPanel({
         ))}
         {streaming && (
           <div className="msg bot">
-            <span className="who">{modelName}</span>
+            <span className="who">assistant</span>
             <div className="body"><MarkdownText text={pending ?? ""} /><span className="cursor" /></div>
           </div>
         )}
