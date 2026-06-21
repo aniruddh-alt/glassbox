@@ -16,6 +16,7 @@ type Row = {
   auroc?: number;
   userDefined?: boolean;
   computing?: boolean;
+  step?: string;
   alertDirection?: "high" | "low";
 };
 
@@ -39,7 +40,7 @@ function ProbeRow({ row }: { row: Row }) {
         <div className="tr">
           {row.userDefined && <span className="ud">custom</span>}
           {row.computing
-            ? <span className="auroc calc">computing…</span>
+            ? <span className="auroc calc">{row.step ?? "computing…"}</span>
             : row.auroc != null && <span className="auroc">AUROC {row.auroc.toFixed(2)}</span>}
         </div>
       </div>
@@ -66,27 +67,37 @@ export function ProbePanel({ trackers }: { trackers: Record<string, Tracker> }) 
   async function define() {
     const concept = (draft.trim() || "over-confidence"); setDraft("");
     const id = `c${++idRef.current}`;
-    setCustom((c) => [...c, { id, name: concept, score: 0, thr: 0.5, flag: false, userDefined: true, computing: true }]);
+    setCustom((c) => [...c, { id, name: concept, score: 0, thr: 0.5, flag: false, userDefined: true, computing: true, step: "queued" }]);
+    const patch = (p: Partial<Row>) =>
+      setCustom((c) => c.map((row) => (row.id === id ? { ...row, ...p } : row)));
+
+    // The probe trains on the pod (Claude designs the trait, gemma generates contrastive pairs,
+    // they're judged and fit). That takes a while, so poll until a terminal state — the previous
+    // single read always caught the job mid-flight and never showed it go live.
+    const TERMINAL = new Set(["ready", "rejected", "error", "unknown", "unavailable"]);
     try {
       const created = await track(concept);
-      const status = await pollTracker(created.tracker_id);
-      const computing = status.status !== "ready";
-      setCustom((c) => c.map((row) =>
-        row.id === id
-          ? {
-              id,
-              name: created.tracker_id,
-              score: 0,
-              thr: PROBE_META[created.tracker_id]?.thr ?? 0.5,
-              flag: false,
-              auroc: status.auroc ?? PROBE_META[created.tracker_id]?.auroc,
-              userDefined: true,
-              computing,
-            }
-          : row));
+      if (!created.tracker_id || created.status === "unavailable") {
+        patch({ computing: false, name: `${concept} — unavailable` });
+        return;
+      }
+      const tid = created.tracker_id;
+      const deadline = Date.now() + 5 * 60 * 1000; // give the pod loop up to ~5 min
+      let status = await pollTracker(tid);
+      while (!TERMINAL.has(status.status) && Date.now() < deadline) {
+        patch({ step: status.progress?.step ?? status.status });
+        await new Promise((r) => setTimeout(r, 3000));
+        status = await pollTracker(tid);
+      }
+      patch({
+        name: tid,
+        thr: PROBE_META[tid]?.thr ?? 0.5,
+        auroc: status.auroc ?? PROBE_META[tid]?.auroc,
+        computing: !TERMINAL.has(status.status),
+        step: status.status === "ready" ? "live" : status.status,
+      });
     } catch {
-      setCustom((c) => c.map((row) =>
-        row.id === id ? { ...row, computing: false, name: `${concept} failed` } : row));
+      patch({ computing: false, name: `${concept} — failed` });
     }
   }
 
@@ -103,7 +114,9 @@ export function ProbePanel({ trackers }: { trackers: Record<string, Tracker> }) 
           <span>In progress. Once probes are trained, each message's meter fills toward its red threshold here.</span>
         </div>
       )}
-      {[...builtins, ...custom].map((row, i) => <ProbeRow key={row.id ?? `b${i}`} row={row} />)}
+      {/* once a custom probe deploys it arrives as a live tracker in event.trackers (a builtin row),
+          so drop the local progress row for it to avoid showing the same probe twice. */}
+      {[...builtins, ...custom.filter((r) => !(r.name in trackers))].map((row, i) => <ProbeRow key={row.id ?? `b${i}`} row={row} />)}
       <div className="define preview">
         <span className="tag">preview</span>
         <input

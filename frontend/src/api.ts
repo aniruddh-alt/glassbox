@@ -5,14 +5,24 @@ export async function track(concept: string, description?: string) {
   const r = await fetch("/api/track", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ concept, description }),
+    body: JSON.stringify({ request: concept, concept, description }),
   });
-  return r.json() as Promise<{ tracker_id: string; status: "computing" | "ready"; artifact?: string }>;
+  // status is the pod job lifecycle (pending | designing | generating | judging | fitting | ready
+  // | rejected | error), plus "unavailable" when the pod can't be reached (tracker_id absent then).
+  return r.json() as Promise<{ tracker_id?: string; status: string; artifact?: string }>;
 }
 
 export async function pollTracker(trackerId: string) {
   const r = await fetch(`/api/track/${trackerId}`);
-  return r.json() as Promise<{ tracker_id?: string; status: "unknown" | "computing" | "ready"; auroc?: number | null; artifact?: string }>;
+  return r.json() as Promise<{
+    tracker_id?: string;
+    status: string;
+    auroc?: number | null;
+    baseline_auroc?: number | null;
+    verdict?: string;
+    progress?: { step: string; pct: number };
+    artifact?: string;
+  }>;
 }
 
 export async function featureLabel(index: number) {

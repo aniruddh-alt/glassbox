@@ -4,9 +4,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from . import config
 
@@ -260,3 +262,47 @@ def turn(body: dict) -> dict:
         "reliable": True,
         "timings": {"capture": capture_ms, "sae": sae_ms, "trackers": trackers_ms},
     }
+
+
+def _launch_agent(tracker_id: str) -> None:
+    """Run the blocking interp-agent pipeline (pod-local gemma + Claude) off the event loop."""
+    from .agent.interp_agent import run_interp_agent
+    from .science import concept_synth as cs
+
+    def _run():
+        try:
+            run_interp_agent(tracker_id)
+        except Exception as e:  # noqa: BLE001 - surface failure in the job record
+            cs.update_job(tracker_id, status="error", error=str(e))
+
+    asyncio.create_task(asyncio.to_thread(_run))
+
+
+@app.post("/api/track", dependencies=[Depends(_require_auth)])
+async def track(body: dict) -> dict:
+    """Submit a natural-language monitoring request. Trains a persona-vector probe in the
+    background ON THIS POD (local gemma generation + Claude design/judge) and, if it clears the
+    AUROC gate, registers it into THIS process's live `persona._trackers` — the same dict /turn
+    scores against, so the next chat turn picks it up. Returns immediately; poll the GET below."""
+    from .science import concept_synth as cs
+
+    if STATE["mode"] != "real":
+        raise HTTPException(status_code=503, detail="model not loaded")
+    if not config.ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not set on pod")
+    request = (body.get("request") or body.get("concept") or body.get("name") or "").strip()
+    if not request:
+        raise HTTPException(status_code=400, detail="request is required")
+    tracker_id = cs.create_job(request)
+    _launch_agent(tracker_id)
+    return {"tracker_id": tracker_id, "status": "pending"}
+
+
+@app.get("/api/track/{tracker_id}", dependencies=[Depends(_require_auth)])
+async def track_status(tracker_id: str):
+    from .science import concept_synth as cs
+
+    job = cs.get_job(tracker_id)
+    if job is None:
+        return JSONResponse({"status": "unknown"}, status_code=404)
+    return job

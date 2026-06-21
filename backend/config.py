@@ -87,8 +87,12 @@ DEFAULT_THRESHOLD = 0.5
 DISABLED_TRACKERS = {"risk_awareness"}
 
 # --- GPU pod (orchestration → remote torch service) ---
-POD_URL = os.getenv("POD_URL", "").rstrip("/")
-POD_TOKEN = os.getenv("POD_TOKEN", "")
+# Defaults wire to the local SSH tunnel (scripts/tunnel_pod.sh → localhost:8001) so the backend
+# reaches the pod no matter how it's launched — a bare `uvicorn backend.app:app` without the env
+# vars set would otherwise silently fall back to synthetic/offline. Override via env for other
+# setups; POD_TOKEN is the shared dev secret (move it to a .env before any public/shared deploy).
+POD_URL = os.getenv("POD_URL", "http://localhost:8001").rstrip("/")
+POD_TOKEN = os.getenv("POD_TOKEN", "glassbox-dev-secret")
 POD_TIMEOUT = float(os.getenv("POD_TIMEOUT", "120"))
 POD_POLL_INTERVAL = float(os.getenv("POD_POLL_INTERVAL", "5"))
 
