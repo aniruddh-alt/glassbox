@@ -111,3 +111,42 @@ def test_register_tracker_rejects_invalid_monitor_config():
 # NOTE: tests for the branch's old concept_synth.synth_concept were removed during the
 # merge with main — main's job-based concept_synth (create_job/get_job) supersedes it.
 # The job-based /api/track flow is currently untested (a pre-existing gap on main).
+
+
+def _noncpu_device():
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return None
+
+
+def test_project_reconciles_artifact_direction_to_activation_device():
+    """The probe pipeline runs on the GPU microservice: activations live on the model device
+    (CUDA on the pod) while the direction + norm tensors come from JSON artifacts (CPU). project()
+    must move them onto the activation device, or the matmul raises a device mismatch and the
+    tracker is silently skipped. Reproduced on CUDA/MPS; skipped on CPU-only, where no mismatch
+    can occur."""
+    dev = _noncpu_device()
+    if dev is None:
+        pytest.skip("needs a non-CPU device (CUDA on the pod, MPS locally)")
+    acts = torch.tensor([3.0, 0.0], device=dev)
+    proj = persona.project(acts, [1.0, 0.0], norm_mean=[1.0, 0.0], norm_std=[1.0, 1.0])
+    assert float(proj) == pytest.approx(2.0)
+
+
+def test_score_all_trackers_scores_activations_on_device():
+    """End-to-end of the live-probe bug: an artifact-loaded tracker (CPU direction) must score
+    activations that live on the model device. Before the device fix every tracker was silently
+    skipped, leaving the probe meters empty despite all artifacts being loaded."""
+    dev = _noncpu_device()
+    if dev is None:
+        pytest.skip("needs a non-CPU device (CUDA on the pod, MPS locally)")
+    persona.register_tracker("uncertainty", direction=[1.0, 0.0], threshold=0.5)
+    out = persona.score_all_trackers(
+        act_last=torch.tensor([0.0, 1.0], device=dev),
+        act_resp=torch.tensor([2.0, 0.0], device=dev),
+    )
+    assert set(out) == {"uncertainty"}
+    assert out["uncertainty"]["proj"] == pytest.approx(2.0)
+    assert out["uncertainty"]["flag"] is True

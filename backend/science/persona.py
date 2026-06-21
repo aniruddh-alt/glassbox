@@ -28,13 +28,18 @@ def persona_vector(act_pos, act_neg):
 def project(acts, direction, *, norm_mean=None, norm_std=None):
     """Scalar projection of one or many activations onto a (unit) direction.
     acts: [d_in] or [n, d_in]; returns float or [n] tensor.
-    Optional norm_mean/norm_std apply per-dimension z-scoring before projection (normed diff-of-means)."""
+    Optional norm_mean/norm_std apply per-dimension z-scoring before projection (normed diff-of-means).
+
+    The direction and norm tensors come from JSON artifacts and so land on CPU, while live
+    activations sit on the model's device (CUDA on the pod). Reconcile both onto the activations'
+    device — otherwise the matmul raises a device mismatch and every tracker is silently skipped."""
     a = acts.float()
+    dev = a.device
     if norm_mean is not None and norm_std is not None:
-        mu = _as_tensor(norm_mean)
-        sd = _as_tensor(norm_std)
+        mu = _as_tensor(norm_mean).to(dev)
+        sd = _as_tensor(norm_std).to(dev)
         a = (a - mu) / (sd + 1e-8)
-    return a @ _unit_direction(direction).float()
+    return a @ _unit_direction(direction).float().to(dev)
 
 
 def _as_tensor(x):
