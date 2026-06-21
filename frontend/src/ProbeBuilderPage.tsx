@@ -42,6 +42,9 @@ function ResultCard({ job }: { job: ProbeBuildJob }) {
         {job.error && (
           <><dt>Error</dt><dd className="err">{job.error}</dd></>
         )}
+        {!job.error && job.status === "error" && (
+          <><dt>Error</dt><dd className="err">Build failed at {job.progress?.step ?? job.status} — check GPU pod logs and retry.</dd></>
+        )}
       </dl>
       {rejected && job.verdict && (
         <p className="obs-hint">

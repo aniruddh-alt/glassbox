@@ -47,6 +47,23 @@ export function runEval(): Promise<{ evaluated: number; off_domain: number } | {
   });
 }
 
+export function replaySentryAlarm(messageId?: string): Promise<{
+  ok: boolean;
+  message_id?: string;
+  flag_reason?: string;
+  reason?: string;
+}> {
+  return fetch("/api/observability/replay-sentry", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(messageId ? { message_id: messageId } : {}),
+  }).then(async (r) => {
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.reason ?? `POST /api/observability/replay-sentry -> ${r.status}`);
+    return body;
+  });
+}
+
 export function testSentryAlarm(): Promise<{
   ok: boolean;
   message_id?: string;

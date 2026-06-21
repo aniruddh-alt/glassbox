@@ -86,33 +86,48 @@ export function ProbePanel({
     };
   });
 
-  // Custom probes deployed via the builder appear in event.trackers but not in ACTIVE_PROBES.
-  const customIds = Object.keys(trackers).filter(
+  // Custom probes registered on the pod (health.trackers) — show even before the first scored turn.
+  const customRegistered = (registered ?? []).filter(
     (id) => !(ACTIVE_PROBES as readonly string[]).includes(id) && isEnabled(id),
   );
-  const custom: Row[] = customIds.map((name) => {
-    const t = trackers[name]!;
-    if (t.status && t.status !== "ready") return null;
+  const custom: Row[] = customRegistered.map((name) => {
+    const t = trackers[name];
+    if (t) {
+      if (t.status && t.status !== "ready") return null;
+      return {
+        name,
+        label: probeLabel(name),
+        score: t.score,
+        flag: t.flag,
+        thr: 0.5,
+        auroc: undefined,
+        userDefined: true,
+        alertDirection: t.alert_direction ?? "high",
+      };
+    }
     return {
       name,
       label: probeLabel(name),
-      score: t.score,
-      flag: t.flag,
+      score: 0,
+      flag: false,
       thr: 0.5,
       auroc: undefined,
       userDefined: true,
-      alertDirection: t.alert_direction ?? "high",
+      alertDirection: "high" as const,
+      awaiting: true,
     };
   }).filter((row): row is Row => row != null);
+
+  const visibleRows = [...builtins, ...custom];
 
   return (
     <div className="panel">
       <div className="ph">
         <h2>Probes</h2>
-        <span className="sub">{orderedIds.map(probeLabel).join(" · ") || "built-ins"}</span>
+        <span className="sub">{visibleRows.map((row) => row.label).join(" · ") || "built-ins"}</span>
         <span className="right coral">outside threshold</span>
       </div>
-      {[...builtins, ...custom].map((row) => (
+      {visibleRows.map((row) => (
         <ProbeRow key={row.name} row={row} />
       ))}
       {onOpenBuilder && (

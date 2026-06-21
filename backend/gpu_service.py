@@ -67,7 +67,7 @@ def _attempt_load() -> None:
         STATE["model_loaded"] = True
         sae.load_sae()
         STATE["sae_loaded"] = True
-        loaded = persona.load_artifacts(include=config.ENABLED_TRACKERS)
+        loaded = persona.load_artifacts(exclude=config.DISABLED_TRACKERS)
         if loaded:
             print(f"[gpu_service] loaded probe trackers: {', '.join(loaded)}")
         STATE["mode"] = "real"
@@ -273,9 +273,22 @@ def _launch_agent(tracker_id: str) -> None:
         try:
             run_interp_agent(tracker_id)
         except Exception as e:  # noqa: BLE001 - surface failure in the job record
-            cs.update_job(tracker_id, status="error", error=str(e))
+            msg = str(e) or f"{type(e).__name__} during probe build"
+            print(f"[gpu_service] interp agent failed ({tracker_id}): {msg}")
+            cs.update_job(tracker_id, status="error", error=msg)
 
     asyncio.create_task(asyncio.to_thread(_run))
+
+
+@app.post("/api/trackers/clear-custom", dependencies=[Depends(_require_auth)])
+async def clear_custom_trackers() -> dict:
+    """Remove user-built probes from live scoring and delete their artifact JSON files."""
+    from .science import persona
+
+    removed = persona.clear_custom_trackers()
+    remaining = list(persona._trackers.keys())
+    print(f"[gpu_service] cleared custom trackers: {', '.join(removed) or '(none)'}")
+    return {"removed": removed, "trackers": remaining}
 
 
 @app.post("/api/track", dependencies=[Depends(_require_auth)])

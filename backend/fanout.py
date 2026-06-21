@@ -168,7 +168,9 @@ def capture_cognition_alarm(event: dict, *, flush: bool = False) -> bool:
 
     Called automatically by ``fanout()`` for every chat turn. Use directly for tests or
     custom hooks. Returns True when a message was queued for Sentry."""
-    if not _sentry_on or not event.get("flag"):
+    if not _sentry_on:
+        return False
+    if not event.get("flag"):
         return False
     import sentry_sdk
 
@@ -177,32 +179,37 @@ def capture_cognition_alarm(event: dict, *, flush: bool = False) -> bool:
         "uncertainty": event.get("uncertainty"),
         "uncertainty_proj": event.get("uncertainty_proj"),
         "trackers": _observable_trackers(event.get("trackers")),
-        "top_features": [f["label"] for f in event.get("features", [])],
+        "top_features": [f["label"] for f in (event.get("features") or [])[:15]],
     }
     if config.SENTRY_SEND_IO:
         io = event.get("io") or {}
         cognition["question"] = _scrub(io.get("user_msg", "") or "")
         cognition["answer"] = _scrub(io.get("response", "") or "")
-    with sentry_sdk.new_scope() as scope:
-        scope.fingerprint = ["glassbox", "medical-cognition", reason]
-        scope.set_tag("model", event.get("model"))
-        scope.set_tag("event_type", "confident_wrong")
-        scope.set_tag("flag_reason", reason)
-        scope.set_tag("message_id", event.get("message_id"))
-        scope.set_tag("uncertainty_bucket", _bucket(event.get("uncertainty")))
-        scope.set_context("cognition", cognition)
-        sentry_sdk.capture_message(
-            "Confident-wrong medical answer", level=_level(event.get("severity", "warning"))
-        )
-    if flush:
+    try:
+        with sentry_sdk.new_scope() as scope:
+            scope.fingerprint = ["glassbox", "medical-cognition", reason]
+            scope.set_tag("model", str(event.get("model") or "unknown"))
+            scope.set_tag("event_type", "confident_wrong")
+            scope.set_tag("flag_reason", str(reason))
+            scope.set_tag("message_id", str(event.get("message_id") or "unknown"))
+            scope.set_tag("uncertainty_bucket", _bucket(event.get("uncertainty")))
+            scope.set_context("cognition", cognition)
+            sentry_sdk.capture_message(
+                f"Confident-wrong medical answer — {reason}", level=_level(event.get("severity", "warning"))
+            )
+        # Flush so short requests and the default transport queue cannot drop the alarm.
         sentry_sdk.flush(timeout=3)
-    return True
+        print(f"[fanout] sentry alarm emitted: reason={reason} message_id={event.get('message_id')}")
+        return True
+    except Exception as e:  # noqa: BLE001 — log but never break fanout / the chat stream
+        print(f"[fanout] sentry alarm failed ({reason}, {event.get('message_id')}): {e}")
+        return False
 
 
 class SentrySink:
     name = "sentry"
     def emit(self, event: dict, perf: dict | None = None) -> None:
-        capture_cognition_alarm(event)
+        capture_cognition_alarm(event, flush=True)
 
 
 # ---------------------------------------------------------------------------

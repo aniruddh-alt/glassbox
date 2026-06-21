@@ -113,6 +113,8 @@ POD_POLL_INTERVAL = float(os.getenv("POD_POLL_INTERVAL", "5"))
 TRACK_AUROC_TAU = float(os.getenv("TRACK_AUROC_TAU", "0.75"))  # deploy gate
 AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-opus-4-8")
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", "claude-opus-4-8")
+# Cap contrastive questions so judge_filter stays within Claude context/time limits (~40×2 rows is fragile).
+AGENT_MAX_QUESTIONS = int(os.getenv("AGENT_MAX_QUESTIONS", "12"))
 
 # --- Runtime ---
 MODE = os.getenv("GLASSBOX_MODE", "posthoc")  # posthoc | live

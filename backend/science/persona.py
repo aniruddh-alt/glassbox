@@ -127,6 +127,39 @@ def clear_trackers() -> None:
     _trackers.clear()
 
 
+def clear_custom_trackers(
+    artifact_dir: str | Path = ARTIFACT_DIR,
+    *,
+    keep: Iterable[str] | None = None,
+    preserve_artifacts: Iterable[str] | None = None,
+) -> list[str]:
+    """Unload non-builtin trackers and delete their on-disk artifact JSON files.
+
+    Built-ins and deprecated training artifacts (``preserve_artifacts``) stay on disk but only
+    ``keep`` ids remain registered in memory.
+    """
+    from .. import config
+
+    keep_set = set(keep if keep is not None else config.ENABLED_TRACKERS)
+    preserve = set(preserve_artifacts if preserve_artifacts is not None else config.DISABLED_TRACKERS)
+    removed: list[str] = []
+    for tid in list(_trackers.keys()):
+        if tid not in keep_set:
+            del _trackers[tid]
+            removed.append(tid)
+
+    root = Path(artifact_dir)
+    if root.exists():
+        for path in sorted(root.glob("*.json")):
+            stem = path.stem
+            if stem in keep_set or stem in preserve:
+                continue
+            path.unlink(missing_ok=True)
+            if stem not in removed:
+                removed.append(stem)
+    return sorted(set(removed))
+
+
 def load_tracker_artifact(path: str | Path) -> str | None:
     """Load one JSON artifact if it contains a ready direction vector.
 

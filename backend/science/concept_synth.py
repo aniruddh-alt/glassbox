@@ -145,8 +145,14 @@ def judge_filter(spec: dict, rows: list[dict], *, client=None, judge_model: str 
         output_config={"format": prompts.judge_schema(len(responses))},
         messages=[{"role": "user", "content": prompts.judge_prompt(spec, responses)}],
     )
-    text = next(b.text for b in resp.content if b.type == "text")
-    scores = json.loads(text)["scores"]
+    text_blocks = [b.text for b in resp.content if b.type == "text"]
+    if not text_blocks:
+        raise ValueError("judge returned no text block (check JUDGE_MODEL / structured output)")
+    text = text_blocks[0]
+    try:
+        scores = json.loads(text)["scores"]
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        raise ValueError(f"judge returned invalid JSON: {e}") from e
     if len(scores) != len(responses):
         raise ValueError(
             f"judge returned {len(scores)} scores for {len(responses)} responses"

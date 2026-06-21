@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import type { ObservabilitySnapshot, ObsConfidentWrong, ObsHealth } from "./types";
 import { useObservability } from "./useObservability";
-import { runEval, testSentryAlarm } from "./api";
+import { runEval, testSentryAlarm, replaySentryAlarm } from "./api";
 import { ACTIVE_PROBES, probeLabel } from "./probes";
 import { collectProbeIds, useProbeVisibility } from "./useProbeVisibility";
 import { ProbeVisibilityPanel } from "./components/ProbeVisibilityPanel";
@@ -96,9 +96,7 @@ function PanelSkeleton({ rows = 3 }: { rows?: number }) {
 // ── System status hero (always from health — wired even with 0 turns) ─────────
 
 function SystemHero({ health, turns }: { health: ObsHealth; turns: number }) {
-  const probes = ACTIVE_PROBES.filter(
-    (id) => !(health.trackers?.length) || health.trackers.includes(id),
-  );
+  const probes = collectProbeIds(ACTIVE_PROBES, health.trackers);
   return (
     <section className="obs-hero panel">
       <div className="obs-hero-main">
@@ -144,7 +142,7 @@ type Kpi = { label: string; value: string; unit?: string; tone?: "accent" | "ok"
 
 function KpiStrip({ snapshot }: { snapshot: ObservabilitySnapshot }) {
   const { totals, flag_rate, trackers, latency, uncertainty_series, health } = snapshot;
-  const probeCount = ACTIVE_PROBES.length;
+  const probeCount = collectProbeIds(ACTIVE_PROBES, health.trackers).length;
   const uncMean = mean(uncertainty_series);
 
   const kpis: Kpi[] = [
@@ -269,9 +267,11 @@ function OverConfidenceTrend({ series }: { series: number[] }) {
 function ConfidentWrongFeed({
   items,
   visibleIds,
+  sentryBase,
 }: {
   items: ObsConfidentWrong[];
   visibleIds: string[];
+  sentryBase?: string | null;
 }) {
   if (!items.length) {
     return (
@@ -298,7 +298,19 @@ function ConfidentWrongFeed({
           return (
             <div key={item.message_id} className="obs-cw-item">
               <div className="obs-cw-meta">
-                <span className="obs-cw-id" title={item.message_id}>{shortId(item.message_id)}</span>
+                {sentryBase ? (
+                  <a
+                    className="obs-cw-id obs-cw-id-link"
+                    href={`${sentryBase}?query=message_id%3A${item.message_id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={`Open ${item.message_id} in Sentry`}
+                  >
+                    {shortId(item.message_id)} ↗
+                  </a>
+                ) : (
+                  <span className="obs-cw-id" title={item.message_id}>{shortId(item.message_id)}</span>
+                )}
                 <span className="obs-cw-ts">{new Date(item.ts * 1000).toLocaleString()}</span>
               </div>
               {trackerEntries.length > 0 && (
@@ -456,13 +468,19 @@ function LatencyHealth({
 function SentryPanel({
   snapshot,
   onTestAlarm,
+  onReplayAlarm,
   testRunning,
   testResult,
+  replayRunning,
+  replayResult,
 }: {
   snapshot: ObservabilitySnapshot;
   onTestAlarm: () => void;
+  onReplayAlarm: () => void;
   testRunning: boolean;
   testResult: string | null;
+  replayRunning: boolean;
+  replayResult: string | null;
 }) {
   const { sentry } = snapshot;
   const issues = sentry.issues ?? [];
@@ -491,6 +509,21 @@ function SentryPanel({
           <button
             type="button"
             className="obs-eval-btn"
+            onClick={onReplayAlarm}
+            disabled={replayRunning || snapshot.confident_wrong.length === 0}
+            title={snapshot.confident_wrong.length === 0 ? "No flagged turns to replay" : undefined}
+          >
+            {replayRunning ? (
+              <>
+                <span className="obs-spinner" aria-hidden="true" /> Replaying last flagged turn…
+              </>
+            ) : (
+              "Replay Sentry for last flagged turn"
+            )}
+          </button>
+          <button
+            type="button"
+            className="obs-eval-btn"
             onClick={onTestAlarm}
             disabled={testRunning}
             aria-busy={testRunning}
@@ -503,7 +536,9 @@ function SentryPanel({
               "Send test Sentry alarm"
             )}
           </button>
-          {testResult && <span className="obs-eval-result">{testResult}</span>}
+          {(replayResult || testResult) && (
+            <span className="obs-eval-result">{replayResult ?? testResult}</span>
+          )}
         </div>
       )}
       {canRead && !issues.length ? (
@@ -558,6 +593,26 @@ export function ObservabilityPage() {
   const [evalResult, setEvalResult] = useState<string | null>(null);
   const [sentryTestRunning, setSentryTestRunning] = useState(false);
   const [sentryTestResult, setSentryTestResult] = useState<string | null>(null);
+  const [sentryReplayRunning, setSentryReplayRunning] = useState(false);
+  const [sentryReplayResult, setSentryReplayResult] = useState<string | null>(null);
+
+  async function handleSentryReplay() {
+    if (sentryReplayRunning) return;
+    setSentryReplayRunning(true);
+    setSentryReplayResult(null);
+    try {
+      const res = await replaySentryAlarm();
+      setSentryReplayResult(
+        res.ok
+          ? `Replayed ${res.flag_reason} alarm for ${res.message_id?.slice(0, 8)}…`
+          : "Replay failed",
+      );
+    } catch (e) {
+      setSentryReplayResult(e instanceof Error ? e.message : "Replay failed");
+    } finally {
+      setSentryReplayRunning(false);
+    }
+  }
 
   async function handleSentryTest() {
     if (sentryTestRunning) return;
@@ -661,7 +716,7 @@ export function ObservabilityPage() {
       </div>
 
       <div className="obs-grid">
-        <ConfidentWrongFeed items={snapshot.confident_wrong} visibleIds={visibleProbeIds} />
+        <ConfidentWrongFeed items={snapshot.confident_wrong} visibleIds={visibleProbeIds} sentryBase={snapshot.sentry.configured ? snapshot.sentry.deep_link : null} />
         <FeatureLeaderboard snapshot={snapshot} />
       </div>
 
@@ -671,8 +726,11 @@ export function ObservabilityPage() {
         <SentryPanel
           snapshot={snapshot}
           onTestAlarm={handleSentryTest}
+          onReplayAlarm={handleSentryReplay}
           testRunning={sentryTestRunning}
           testResult={sentryTestResult}
+          replayRunning={sentryReplayRunning}
+          replayResult={sentryReplayResult}
         />
         <PhoenixPanel url={snapshot.phoenix_ui_url} />
       </div>

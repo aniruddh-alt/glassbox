@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import config, labels, observability, runtime, sentry_api
 from .analyze import analyze_turn
-from .fanout import fanout, init_sponsors, capture_cognition_alarm, sentry_enabled
+from .fanout import fanout, init_sponsors, capture_cognition_alarm, sentry_enabled, _flag_reason
 
 _TOKEN_CADENCE_S = 0.012  # replay the (already-generated) answer at a readable typing pace
 
@@ -106,9 +106,26 @@ async def observability_test_sentry():
     return {
         "ok": sent,
         "message_id": message_id,
-        "flag_reason": "over_confidence",
+        "flag_reason": _flag_reason(event),
         "hint": "Check Sentry Issues for “Confident-wrong medical answer”. Chat turns alarm the same way when a probe flags.",
     }
+
+
+@app.post("/api/observability/replay-sentry")
+async def observability_replay_sentry(body: dict | None = None):
+    """Re-emit Sentry for a flagged turn already in the in-process store (e.g. if an alarm was missed)."""
+    if not sentry_enabled():
+        return JSONResponse({"ok": False, "reason": "SENTRY_DSN not configured"}, status_code=503)
+    message_id = (body or {}).get("message_id")
+    if message_id:
+        view = observability.STORE.get_turn(message_id)
+    else:
+        flagged = observability.STORE.snapshot()["confident_wrong"]
+        view = observability.STORE.get_turn(flagged[-1]["message_id"]) if flagged else None
+    if view is None or not view.get("flag"):
+        return JSONResponse({"ok": False, "reason": "turn not found or not flagged"}, status_code=404)
+    sent = capture_cognition_alarm({**view, "io": {}}, flush=True)
+    return {"ok": sent, "message_id": view["message_id"], "flag_reason": _flag_reason(view)}
 
 
 def _chunks(text: str) -> list[str]:
@@ -147,8 +164,15 @@ async def chat(body: dict):
 async def analyze(body: dict):
     """Post-hoc / non-streaming variant: returns the CognitionEvent as JSON."""
     messages = body.get("messages") or []
-    _, event, _perf = await run_in_threadpool(analyze_turn, messages)
-    return JSONResponse(event.model_dump())
+    turn_start_ns = time.time_ns()
+    _, event, perf = await run_in_threadpool(analyze_turn, messages)
+    perf["t0_ns"] = turn_start_ns
+    payload = event.model_dump()
+    try:
+        fanout(payload, perf)
+    except Exception as e:
+        print(f"[app] fanout failed: {e}")
+    return JSONResponse(payload)
 
 
 @app.post("/api/track")
@@ -163,6 +187,18 @@ async def track(body: dict):
         return await run_in_threadpool(pod_client.track, request)
     except Exception as e:  # noqa: BLE001 - pod down / not configured
         print(f"[app] track proxy failed: {e}")
+        return JSONResponse({"status": "unavailable"}, status_code=503)
+
+
+@app.post("/api/trackers/clear-custom")
+async def clear_custom_trackers():
+    """Proxy custom-probe cleanup to the GPU pod (in-memory + artifact files)."""
+    from . import pod_client
+
+    try:
+        return await run_in_threadpool(pod_client.clear_custom_trackers)
+    except Exception as e:  # noqa: BLE001 - pod down / not configured
+        print(f"[app] clear_custom_trackers proxy failed: {e}")
         return JSONResponse({"status": "unavailable"}, status_code=503)
 
 

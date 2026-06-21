@@ -131,7 +131,34 @@ def turn(messages: list[dict], *, max_new: int | None = None) -> dict:
 
 def track(request: str) -> dict:
     """POST /api/track → {tracker_id, status}. Body carries only the NL request (no PHI)."""
-    return _post("/api/track", {"request": request}, stage="track")
+    import httpx
+
+    try:
+        r = httpx.post(
+            f"{_base_url()}/api/track",
+            json={"request": request},
+            headers=_headers(),
+            timeout=config.POD_TIMEOUT,
+        )
+    except httpx.HTTPError as e:
+        raise PodError(0, "track") from e
+    if r.status_code == 200:
+        return r.json()
+    # Safe to surface pod setup errors (no model I/O in these bodies).
+    detail = ""
+    try:
+        detail = str(r.json().get("detail") or "")
+    except Exception:  # noqa: BLE001
+        detail = ""
+    print(f"[pod] track HTTP {r.status_code}: {(detail or r.text)[:200]}")
+    if detail:
+        return {"status": "unavailable", "detail": detail}
+    raise PodError(r.status_code, "track")
+
+
+def clear_custom_trackers() -> dict:
+    """POST /api/trackers/clear-custom → {removed, trackers}."""
+    return _post("/api/trackers/clear-custom", {}, stage="clear_custom_trackers")
 
 
 def track_status(tracker_id: str) -> dict:

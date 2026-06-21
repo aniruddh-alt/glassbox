@@ -9,7 +9,7 @@ export type ProbeDisplayPrefs = Record<string, boolean>;
 
 function defaultEnabled(id: string): boolean {
   if (HIDDEN_PROBES.has(id)) return false;
-  return isBuiltinProbe(id);
+  return true;
 }
 
 function loadPrefs(): ProbeDisplayPrefs {

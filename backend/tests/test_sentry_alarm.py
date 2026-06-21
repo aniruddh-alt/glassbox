@@ -44,6 +44,39 @@ def test_capture_cognition_alarm_requires_flag(monkeypatch):
     assert captured["msg"] == "Confident-wrong medical answer"
 
 
+def test_replay_sentry_endpoint(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from backend.app import app
+    from backend import observability
+
+    store = observability.ObservabilityStore()
+    monkeypatch.setattr(observability, "STORE", store)
+    store.record(
+        {
+            "message_id": "m-flag",
+            "ts": 1.0,
+            "flag": True,
+            "severity": "warning",
+            "trackers": {"harmful_prompt": {"score": 0.91, "flag": True}},
+            "features": [{"index": 1, "label": "crisis"}],
+        },
+        None,
+    )
+    monkeypatch.setattr("backend.app.sentry_enabled", lambda: True)
+    captured = {}
+
+    def _capture(ev, flush=False):
+        captured["reason"] = __import__("backend.fanout", fromlist=["_flag_reason"])._flag_reason(ev)
+        return True
+
+    monkeypatch.setattr("backend.app.capture_cognition_alarm", _capture)
+    r = TestClient(app).post("/api/observability/replay-sentry")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert captured["reason"] == "harmful_prompt"
+
+
 def test_test_sentry_endpoint(monkeypatch):
     from fastapi.testclient import TestClient
 
