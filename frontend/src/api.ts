@@ -1,4 +1,5 @@
 // Small fetch helpers. OWNER: Lane C.
+import type { ObservabilitySnapshot } from "./types";
 
 export async function track(concept: string, description?: string) {
   const r = await fetch("/api/track", {
@@ -17,4 +18,12 @@ export async function pollTracker(trackerId: string) {
 export async function featureLabel(index: number) {
   const r = await fetch(`/api/feature/${index}`);
   return r.json() as Promise<{ index: number; label: string; source: string; caveat: string }>;
+}
+
+export function getObservability(): Promise<ObservabilitySnapshot> {
+  return fetch("/api/observability").then((r) => r.json()) as Promise<ObservabilitySnapshot>;
+}
+
+export function runEval(): Promise<{ evaluated: number; off_domain: number } | { status: string }> {
+  return fetch("/api/observability/eval", { method: "POST" }).then((r) => r.json());
 }
