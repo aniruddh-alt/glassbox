@@ -115,3 +115,8 @@ main{flex:1;display:grid;grid-template-columns:minmax(300px,36fr) 64fr;gap:14px;
 
 @media(max-width:900px){main{grid-template-columns:1fr;overflow-y:auto}.cloud{height:330px}}
 .empty{margin:auto;color:var(--muted);font-size:13px;text-align:center;max-width:280px;line-height:1.55}
+
+.badge{font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;padding:3px 9px;border-radius:999px;border:1px solid var(--brd2)}
+.badge.real{color:var(--teal);background:rgba(91,216,199,.1);border-color:rgba(91,216,199,.25)}
+.badge.fallback{color:var(--amber);background:rgba(240,180,84,.1);border-color:rgba(240,180,84,.25)}
+.badge.loading{color:var(--muted);background:rgba(255,255,255,.04)}

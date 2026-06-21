@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import "./styles.css";
 import type { CognitionEvent } from "./types";
 import { useCognitionStream } from "./useCognitionStream";
+import { useHealth, MODE_BADGE } from "./health";
 import { ChatPanel, type Msg } from "./components/ChatPanel";
 import { FeatureField } from "./components/FeatureField";
 import { ProbePanel } from "./components/ProbePanel";
@@ -14,6 +15,7 @@ export function App() {
   const { answer, event, status, send } = useCognitionStream();
   const [thread, setThread] = useState<Msg[]>([]);
   const [latest, setLatest] = useState<CognitionEvent | null>(null);
+  const health = useHealth();
 
   function onSend(content: string) {
     const history: Msg[] = [...thread, { role: "user", content }];
@@ -36,13 +38,17 @@ export function App() {
 
   const features = useMemo(() => latest?.features ?? [], [latest]);
   const trackers = useMemo(() => latest?.trackers ?? {}, [latest]);
-  const modelName = latest?.model ?? "model";
+  const modelName = latest?.model ?? health?.model ?? "model";
+  const layerLabel = latest?.layer ?? health?.layer ?? "—";
 
   return (
     <div className="app">
       <header className="glass">
         <div className="mark"><span className="lens" /><span className="g">glass</span><b>box</b></div>
-        <div className="meta"><span className="pill">{modelName} · L{latest?.layer ?? "—"}</span></div>
+        <div className="meta">
+          <span className="pill">{modelName} · L{layerLabel}</span>
+          {health && <span className={`badge ${health.mode}`}>{MODE_BADGE[health.mode]}</span>}
+        </div>
         <div className="live"><span className="d" />observing</div>
       </header>
 
