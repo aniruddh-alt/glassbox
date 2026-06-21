@@ -87,6 +87,11 @@ POD_TOKEN = os.getenv("POD_TOKEN", "")
 POD_TIMEOUT = float(os.getenv("POD_TIMEOUT", "120"))
 POD_POLL_INTERVAL = float(os.getenv("POD_POLL_INTERVAL", "5"))
 
+# --- Interpretability Agent ---
+TRACK_AUROC_TAU = float(os.getenv("TRACK_AUROC_TAU", "0.75"))  # deploy gate
+AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-opus-4-8")
+JUDGE_MODEL = os.getenv("JUDGE_MODEL", "claude-opus-4-8")
+
 # --- Runtime ---
 MODE = os.getenv("GLASSBOX_MODE", "posthoc")  # posthoc | live
 # Response length cap for the chat/analyze path. The old 48-token default truncated answers

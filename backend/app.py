@@ -15,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 from . import config, labels, runtime
 from .analyze import analyze_turn
 from .fanout import fanout, init_sponsors
+from .science import concept_synth as _cs
 
 _TOKEN_CADENCE_S = 0.012  # replay the (already-generated) answer at a readable typing pace
 
@@ -81,15 +82,34 @@ async def analyze(body: dict):
     return JSONResponse(event.model_dump())
 
 
+def _launch_agent(tracker_id: str) -> None:
+    """Run the blocking agent pipeline off the event loop."""
+    from .agent.interp_agent import run_interp_agent
+
+    def _run():
+        try:
+            run_interp_agent(tracker_id)
+        except Exception as e:  # noqa: BLE001 - surface failure in the job record
+            _cs.update_job(tracker_id, status="error", error=str(e))
+
+    asyncio.create_task(asyncio.to_thread(_run))
+
+
 @app.post("/api/track")
 async def track(body: dict):
-    """User-defined concept (WIP — synth_concept unimplemented). Returns a stub status."""
-    return {"tracker_id": body.get("concept", "concept"), "status": "computing"}
+    """Submit a natural-language monitoring request. Returns immediately; runs in the bg."""
+    request = body.get("request") or body.get("concept") or body.get("name") or ""
+    tracker_id = _cs.create_job(request)
+    _launch_agent(tracker_id)
+    return {"tracker_id": tracker_id, "status": "pending"}
 
 
 @app.get("/api/track/{tracker_id}")
 async def track_status(tracker_id: str):
-    return {"status": "ready", "auroc": None}
+    job = _cs.get_job(tracker_id)
+    if job is None:
+        return JSONResponse({"status": "unknown"}, status_code=404)
+    return job
 
 
 @app.get("/api/feature/{index}")
