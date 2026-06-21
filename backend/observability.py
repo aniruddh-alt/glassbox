@@ -64,14 +64,14 @@ class ObservabilityStore:
             d["mean_act"] = round(sum(d["_acts"]) / len(d["_acts"]), 4) if d["_acts"] else None
             d.pop("_acts")
         # latency percentiles per stage
-        def stage_vals(key):
+        def stage_vals():
             out = {}
             for it in items:
                 for name, ms in (it["perf"].get("stages", {}) | it["perf"].get("pod_stages", {})).items():
                     out.setdefault(name, []).append(ms)
             return out
         turn_ms = [it["perf"].get("turn_ms") for it in items if it["perf"].get("turn_ms") is not None]
-        stages = stage_vals("stages")
+        stages = stage_vals()
         latency = {"turn_ms": {"p50": _pct(turn_ms, 50), "p95": _pct(turn_ms, 95),
                                "last": turn_ms[-1] if turn_ms else None},
                    "stages": {n: {"p50": _pct(vs, 50)} for n, vs in stages.items()}}
