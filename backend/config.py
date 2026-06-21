@@ -81,6 +81,11 @@ STRUCTURAL_PENALTY = float(os.getenv("STRUCTURAL_PENALTY", "0.15"))
 BUILTIN_TRACKERS = ["uncertainty", "harmful", "hallucination"]
 DEFAULT_THRESHOLD = 0.5
 
+# Probes whose artifacts stay on disk but are NOT loaded at startup. risk_awareness was dropped:
+# its low-direction signal read 0.00 / always-flagged in practice, so it added noise without signal.
+# Re-enable by removing the id here (the trained artifact is untouched in science/artifacts/).
+DISABLED_TRACKERS = {"risk_awareness"}
+
 # --- GPU pod (orchestration → remote torch service) ---
 POD_URL = os.getenv("POD_URL", "").rstrip("/")
 POD_TOKEN = os.getenv("POD_TOKEN", "")

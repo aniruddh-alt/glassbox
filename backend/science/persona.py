@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -152,13 +153,23 @@ def load_tracker_artifact(path: str | Path) -> str | None:
     return str(tid)
 
 
-def load_artifacts(artifact_dir: str | Path = ARTIFACT_DIR) -> list[str]:
-    """Load all ready tracker artifacts from a directory."""
+def load_artifacts(
+    artifact_dir: str | Path = ARTIFACT_DIR,
+    exclude: Iterable[str] = (),
+) -> list[str]:
+    """Load all ready tracker artifacts from a directory.
+
+    `exclude` skips artifacts by id (filename stem) — used to keep a trained probe on disk
+    while leaving it out of the live tracker set.
+    """
     root = Path(artifact_dir)
     if not root.exists():
         return []
+    skip = set(exclude)
     loaded: list[str] = []
     for path in sorted(root.glob("*.json")):
+        if path.stem in skip:
+            continue
         tid = load_tracker_artifact(path)
         if tid:
             loaded.append(tid)
