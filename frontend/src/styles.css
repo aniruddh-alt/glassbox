@@ -114,3 +114,4 @@ main{flex:1;display:grid;grid-template-columns:minmax(300px,36fr) 64fr;gap:14px;
 .ethos b{color:var(--cyan);font-weight:600}
 
 @media(max-width:900px){main{grid-template-columns:1fr;overflow-y:auto}.cloud{height:330px}}
+.empty{margin:auto;color:var(--muted);font-size:13px;text-align:center;max-width:280px;line-height:1.55}

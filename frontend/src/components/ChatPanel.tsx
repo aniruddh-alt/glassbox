@@ -1,45 +1,62 @@
-// Clinician chat: the question + the streamed model answer + the Run/Replay composer.
+// Clinician chat: a multi-turn thread + the streaming assistant turn + the composer.
 import { useEffect, useRef, useState } from "react";
 
+export type Msg = { role: "user" | "assistant"; content: string };
+
 export function ChatPanel({
-  userMsg, answer, status, hasRun, onRun,
+  thread, pending, status, modelName, onSend,
 }: {
-  userMsg: string;
-  answer: string;
+  thread: Msg[];
+  pending: string | null;            // the in-progress assistant text while streaming
   status: "idle" | "streaming" | "done" | "error";
-  hasRun: boolean;
-  onRun: (content: string) => void;
+  modelName: string;
+  onSend: (content: string) => void;
 }) {
-  const [draft, setDraft] = useState(userMsg);
+  const [draft, setDraft] = useState("Is ibuprofen safe to take in the third trimester of pregnancy?");
   const threadRef = useRef<HTMLDivElement>(null);
   const streaming = status === "streaming";
 
   useEffect(() => {
-    const t = threadRef.current; if (t) t.scrollTop = t.scrollHeight;
-  }, [answer]);
+    const t = threadRef.current;
+    if (t) t.scrollTop = t.scrollHeight;
+  }, [thread, pending]);
+
+  function submit() {
+    const content = draft.trim();
+    if (!content || streaming) return;
+    onSend(content);
+    setDraft("");
+  }
+
+  const who = (role: Msg["role"]) => (role === "user" ? "clinician" : modelName);
 
   return (
     <section className="chat glass">
       <div className="thread" ref={threadRef}>
-        <div className="msg user">
-          <span className="who">clinician</span>
-          <div className="body">{userMsg}</div>
-        </div>
-        {(answer || streaming) && (
+        {thread.length === 0 && !pending && (
+          <div className="empty">Ask a clinical question to watch the model's features fire.</div>
+        )}
+        {thread.map((m, i) => (
+          <div key={i} className={`msg ${m.role === "user" ? "user" : "bot"}`}>
+            <span className="who">{who(m.role)}</span>
+            <div className="body">{m.content}</div>
+          </div>
+        ))}
+        {streaming && (
           <div className="msg bot">
-            <span className="who">gemma-2-2b-it</span>
-            <div className="body">{answer}{streaming && <span className="cursor" />}</div>
+            <span className="who">{modelName}</span>
+            <div className="body">{pending}<span className="cursor" /></div>
           </div>
         )}
       </div>
       <div className="composer">
-        <textarea value={draft} onChange={(e) => setDraft(e.target.value)} />
-        <button
-          className={`send ${streaming ? "running" : ""}`}
-          disabled={streaming}
-          onClick={() => onRun(draft)}
-        >
-          {streaming ? "Running…" : hasRun ? "Replay ▸" : "Run ▸"}
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
+        />
+        <button className={`send ${streaming ? "running" : ""}`} disabled={streaming} onClick={submit}>
+          {streaming ? "Running…" : "Send ▸"}
         </button>
       </div>
     </section>

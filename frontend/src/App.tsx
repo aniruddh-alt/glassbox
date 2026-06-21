@@ -1,51 +1,63 @@
-// Root view — the ClinicianView demo hero. OWNER: Lane C.
-// Chat (left) | cognition stage (right): the SAE feature field + probe panel + the Claude verdict.
-// Built against the demo event (mock:true). Flip mock:false once /api/chat streams real NDJSON.
+// Root view. Left: multi-turn clinician chat. Right: cognition stage (feature field + probes +
+// Claude verdict) reflecting the LATEST message's CognitionEvent. Real /api/chat (no mock).
 import { useEffect, useMemo, useState } from "react";
 
 import "./styles.css";
+import type { CognitionEvent } from "./types";
 import { useCognitionStream } from "./useCognitionStream";
-import { DEMO_EVENT } from "./mock";
-import { ChatPanel } from "./components/ChatPanel";
+import { ChatPanel, type Msg } from "./components/ChatPanel";
 import { FeatureField } from "./components/FeatureField";
 import { ProbePanel } from "./components/ProbePanel";
 import { AdjudicationBanner } from "./components/AdjudicationBanner";
 
 export function App() {
-  const { answer, event, status, send } = useCognitionStream({ mock: true });
-  const [hasRun, setHasRun] = useState(false);
+  const { answer, event, status, send } = useCognitionStream();
+  const [thread, setThread] = useState<Msg[]>([]);
+  const [latest, setLatest] = useState<CognitionEvent | null>(null);
 
-  // auto-run once on load so the page shows the full arc immediately
+  function onSend(content: string) {
+    const history: Msg[] = [...thread, { role: "user", content }];
+    setThread(history);
+    send(history);
+  }
+
+  // Commit the assistant turn + capture its event when a stream finishes.
+  // The "last msg is user" guard makes this idempotent across re-renders.
   useEffect(() => {
-    const id = setTimeout(() => send([{ role: "user", content: DEMO_EVENT.io.user_msg }]), 400);
-    return () => clearTimeout(id);
-  }, []);
-  useEffect(() => { if (status === "done") setHasRun(true); }, [status]);
+    if (status === "done") {
+      setThread((t) => (t.length && t[t.length - 1].role === "user"
+        ? [...t, { role: "assistant", content: answer || "" }] : t));
+      if (event) setLatest(event);
+    } else if (status === "error") {
+      setThread((t) => (t.length && t[t.length - 1].role === "user"
+        ? [...t, { role: "assistant", content: "[generation failed]" }] : t));
+    }
+  }, [status]);
 
-  // stable identity when empty so the canvas effect doesn't rebuild on every streamed token
-  const features = useMemo(() => event?.features ?? [], [event]);
-  const trackers = useMemo(() => event?.trackers ?? {}, [event]);
+  const features = useMemo(() => latest?.features ?? [], [latest]);
+  const trackers = useMemo(() => latest?.trackers ?? {}, [latest]);
+  const modelName = latest?.model ?? "model";
 
   return (
     <div className="app">
       <header className="glass">
         <div className="mark"><span className="lens" /><span className="g">glass</span><b>box</b></div>
-        <div className="meta"><span className="pill">gemma-2-2b-it · L12</span></div>
+        <div className="meta"><span className="pill">{modelName} · L{latest?.layer ?? "—"}</span></div>
         <div className="live"><span className="d" />observing</div>
       </header>
 
       <main>
         <ChatPanel
-          userMsg={DEMO_EVENT.io.user_msg}
-          answer={answer}
+          thread={thread}
+          pending={status === "streaming" ? answer : null}
           status={status}
-          hasRun={hasRun}
-          onRun={(content) => send([{ role: "user", content }])}
+          modelName={modelName}
+          onSend={onSend}
         />
         <section className="stage">
           <FeatureField features={features} />
           <ProbePanel trackers={trackers} />
-          <AdjudicationBanner adjudication={event?.adjudication ?? null} />
+          <AdjudicationBanner adjudication={latest?.adjudication ?? null} />
           <p className="ethos">
             <b>Surface, never suppress</b> — we flag when to double-check, never alter the answer.
           </p>
