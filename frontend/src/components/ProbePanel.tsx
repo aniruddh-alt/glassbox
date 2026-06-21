@@ -66,12 +66,12 @@ export function ProbePanel({ trackers }: { trackers: Record<string, Tracker> }) 
       <div className="ph">
         <h2>Probes</h2>
         <span className="sub">calibrated</span>
-        <span className="right coral">coral · over threshold</span>
+        <span className="right coral">over threshold</span>
       </div>
       {noBuiltins && custom.length === 0 && (
         <div className="wip">
           <b>Family B — calibrated uncertainty / safety probes</b>
-          <span>In progress. Once probes are trained, the live meter (green → red) appears here per message.</span>
+          <span>In progress. Once probes are trained, each message's meter fills toward its red threshold here.</span>
         </div>
       )}
       {[...builtins, ...custom].map((row, i) => <ProbeRow key={row.id ?? `b${i}`} row={row} />)}

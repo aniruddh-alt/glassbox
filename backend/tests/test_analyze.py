@@ -18,3 +18,52 @@ def test_analyze_turn_fallback_builds_valid_event():
     assert event.features[0].label
     # round-trips through a fresh validation
     CognitionEvent(**event.model_dump())
+
+
+def test_real_turn_uses_pod_client_and_ranks(monkeypatch):
+    runtime.STATE.update(mode="real", model_loaded=True, sae_loaded=True)
+    monkeypatch.setattr(
+        analyze.labels,
+        "get_feature_stats",
+        lambda i, **k: {"label": f"label-{i}", "max_act": 1.0, "density": 0.001},
+    )
+
+    def fake_turn(messages, max_new=None):
+        return {
+            "answer": "pod answer",
+            "candidates": [
+                {"index": 2, "act": 1.0, "attr": 0.9, "source": "s"},
+                {"index": 1, "act": 5.0, "attr": 0.2, "source": "s"},
+            ],
+            "trackers": {
+                "uncertainty": {
+                    "score": 0.3,
+                    "proj": 0.1,
+                    "proj_pre": None,
+                    "flag": False,
+                    "reliable": True,
+                    "status": "ready",
+                    "user_defined": False,
+                }
+            },
+            "reliable": True,
+        }
+
+    import backend.pod_client as pc
+
+    monkeypatch.setattr(pc, "turn", fake_turn)
+    answer, event = analyze.analyze_turn([{"role": "user", "content": "hi"}])
+    assert answer == "pod answer"
+    assert [f.index for f in event.features] == [2, 1]
+    assert event.features[0].label == "label-2"
+
+
+def test_real_turn_degrades_on_pod_failure(monkeypatch):
+    runtime.STATE.update(mode="real", model_loaded=True, sae_loaded=True)
+    import backend.pod_client as pc
+
+    monkeypatch.setattr(pc, "turn", lambda *a, **k: (_ for _ in ()).throw(pc.PodError("down")))
+    monkeypatch.setattr(analyze.runtime, "refresh_pod_health", lambda: None)
+    answer, event = analyze.analyze_turn([{"role": "user", "content": "Is ibuprofen safe?"}])
+    assert isinstance(answer, str) and answer.strip()
+    assert len(event.features) > 0

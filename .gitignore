@@ -18,6 +18,9 @@ backend/science/vectors/*.pkl
 hf_cache/
 .cache/
 
+# Auto-interp label cache (regenerated/prewarmed on demand; not source)
+backend/autointerp_cache.json
+
 # Data (pre-cached datasets)
 data/
 *.parquet

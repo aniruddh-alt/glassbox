@@ -12,7 +12,7 @@ export function AdjudicationBanner({ adjudication }: { adjudication: Adjudicatio
   if (!adjudication) return null;
   return (
     <div className="verdict glass" ref={ref}>
-      <div className="mk">⚑</div>
+      <span className="mk" aria-hidden="true" />
       <div>
         <div className="vt">confident-wrong · claude adjudication</div>
         <div className="vb">{adjudication.rationale}</div>

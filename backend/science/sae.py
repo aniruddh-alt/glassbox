@@ -25,6 +25,14 @@ def load_sae(layer: int = config.LAYER, device: str | None = None):
     return _sae
 
 
+def width() -> int | None:
+    """Number of latents (d_sae) of the loaded SAE, or None if not loaded."""
+    if _sae is None:
+        return None
+    cfg = getattr(_sae, "cfg", None)
+    return int(getattr(cfg, "d_sae", 0)) or None
+
+
 def _prep(act):
     """Flatten one token's activation to [d_in] float32 on the SAE's device."""
     dev = next(_sae.parameters()).device
@@ -32,9 +40,10 @@ def _prep(act):
 
 
 def sae_topk(act, k: int = config.TOPK) -> list[dict]:
-    """act: layer-12 residual activation tensor [d_in=2304] (one token).
+    """act: layer-LAYER resid_post activation tensor [d_in=2560] (one token).
     Returns up to k {index, act, source} dicts (labels attached later by labels.py).
     Mask special tokens upstream — their activations are high-norm noise.
+    Used by the legacy raw-activation ranking path; attribution_topk is preferred.
     """
     import torch
 
@@ -49,6 +58,78 @@ def sae_topk(act, k: int = config.TOPK) -> list[dict]:
         for v, i in zip(vals.tolist(), idx.tolist())
         if v > 0
     ]
+
+
+def _W_dec():
+    """Decoder matrix [d_sae, d_in] — row f is feature f's residual-space direction."""
+    w = getattr(_sae, "W_dec", None)
+    if w is None:
+        raise RuntimeError("loaded SAE exposes no W_dec; cannot compute attribution")
+    return w
+
+
+def feature_attribution(acts, grad, keep):
+    """Per-feature signed attribution over kept positions. Returns (attr[d_sae], act_max[d_sae]).
+
+    attr[f] = sum_p act_{f,p} · (grad_p · W_dec[f]) — the first-order (attribution-patching)
+    estimate of how much feature f shaped the response-logit metric. act_max is each feature's
+    peak activation over kept positions (for display)."""
+    import torch
+
+    if _sae is None:
+        raise RuntimeError("call load_sae() first")
+    dev = next(_sae.parameters()).device
+    sel = torch.as_tensor(list(keep), dtype=torch.long, device=acts.device)
+    a = acts.index_select(0, sel).detach().float().to(dev)
+    g = grad.index_select(0, sel).detach().float().to(dev)
+    with torch.no_grad():
+        feats = _sae.encode(a).float()           # [n, d_sae] sparse JumpReLU activations
+        gd = g @ _W_dec().float().t()            # [n, d_sae] grad · decoder direction per feature
+        attr = (feats * gd).sum(0)               # [d_sae] attribution summed over positions
+        act_max = feats.max(0).values            # [d_sae] representative activation for display
+    return attr, act_max
+
+
+def attribution_topk(acts, grad, keep, cap: int = config.TOPK_CANDIDATES, baseline=None) -> list[dict]:
+    """Rank features by causal effect on the response, not by raw activation.
+
+    For each kept position p, feature f's attribution is act_{f,p} · (grad_p · W_dec[f]) — the
+    first-order (attribution-patching) estimate of how much ablating that feature would change a
+    response-logit metric — summed over positions. This is the method Anthropic (Scaling
+    Monosemanticity) and Goodfire use to pick "the features behind THIS output"; it structurally
+    down-weights high-frequency grammatical features (large activation, tiny per-token effect on
+    the answer) and surfaces features that actually shape the medical response.
+
+    baseline: optional [d_sae] attribution vector from a neutral prompt. When given, it is
+    SUBTRACTED, cancelling "always-on" discourse features (greetings, "Okay, let's...") that score
+    highly on every reply, leaving topic-specific features (contrastive attribution).
+
+    acts/grad: [n_pos, d_in] response-position activations and dL/d(resid_post), ALIGNED.
+    keep: positions in [0, n_pos) to include (special tokens already excluded by the caller).
+    Returns up to `cap` {index, act, attr, source} dicts, highest attribution first.
+    """
+    if _sae is None:
+        raise RuntimeError("call load_sae() first")
+    if not keep:
+        return []
+    attr, act_max = feature_attribution(acts, grad, keep)
+    if baseline is not None:
+        attr = attr - baseline.to(attr.device)   # contrastive: cancel always-on features
+    k = min(cap, attr.shape[0])
+    vals, idxs = attr.topk(k)
+    out: list[dict] = []
+    for v, i in zip(vals.tolist(), idxs.tolist()):
+        if v <= 0:  # keep only features that positively contributed to producing the answer
+            continue
+        out.append(
+            {
+                "index": int(i),
+                "act": round(float(act_max[i]), 3),
+                "attr": round(float(v), 4),
+                "source": config.NP_SOURCE,
+            }
+        )
+    return out
 
 
 def reconstruction_error(act) -> dict:
