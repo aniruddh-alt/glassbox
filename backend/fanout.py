@@ -5,17 +5,20 @@ touches the GPU.
 
 OWNER: Lane A.
 
-Two observability surfaces, fed by ONE event:
-  - Sentry  = the INCIDENT view. A confident-wrong answer becomes a grouped Issue
-              (fingerprint collapses repeats), with the cognition payload attached.
-  - Phoenix = the ANALYTICS view. Every message becomes one OpenInference LLM span
-              you can filter/sort/eval in the dashboard at localhost:6006.
+One redacted event → many interchangeable Sinks:
+  - Sentry  = the INCIDENT view. A flagged turn becomes a grouped Issue (fingerprinted by
+              which probe fired), with a PII-free cognition payload. Prompt/response are
+              NEVER sent by default; SENTRY_SEND_IO is an opt-in (default off), regex-scrubbed.
+  - Phoenix = the ANALYTICS view. Every message becomes one OpenInference span (NO input/output)
+              with a per-stage latency waterfall, filterable/evaluable at localhost:6006.
+  - Store   = the in-process redacted snapshot behind /api/observability (+ future MCP).
 """
 
 from __future__ import annotations
 
 import os
 import json
+import re
 from typing import Protocol, runtime_checkable
 from urllib.parse import urlparse
 
@@ -72,11 +75,26 @@ def report_error(stage: str, exc: BaseException, ctx: dict | None = None) -> Non
 
 
 # ---------------------------------------------------------------------------
-# Task 5: PII scrub + level clamp
+# PII handling: structured regex scrub + level clamp + before_send
 # ---------------------------------------------------------------------------
 
 _VALID_LEVELS = {"fatal", "critical", "error", "warning", "info", "debug"}
 _PII_KEYS = {"question", "answer", "user_msg", "response", "prompt", "messages", "io"}
+
+# Structured-PII patterns scrubbed from any free-text before it leaves the box. Catches
+# emails/phones/SSNs — NOT unstructured identifiers like names. For real PHI keep
+# SENTRY_SEND_IO off (the default) so prompt/response never leave at all.
+_PII = [
+    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "[email]"),
+    (re.compile(r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b"), "[phone]"),
+    (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[ssn]"),
+]
+
+
+def _scrub(s: str) -> str:
+    for pat, repl in _PII:
+        s = pat.sub(repl, s)
+    return s
 
 
 def _level(severity: str) -> str:
@@ -84,27 +102,52 @@ def _level(severity: str) -> str:
 
 
 def _scrub_pii(event: dict, hint: dict):
-    """before_send: drop ALL exception-frame locals + any forbidden-key values anywhere. Defense-in-depth."""
+    """Sentry before_send (supersedes main's _scrub_event). ALWAYS: zero every exception-frame
+    local (they carry the prompt/io) + regex-scrub structured PII from every string anywhere.
+    When SENTRY_SEND_IO is off (default), ALSO hard-redact any forbidden-key value so prompt/
+    response can never leak even if some future code path attaches them."""
     for v in event.get("exception", {}).get("values", []):
         for fr in v.get("stacktrace", {}).get("frames", []):
             fr["vars"] = {}
+    redact_keys = set() if config.SENTRY_SEND_IO else _PII_KEYS
+
     def walk(o):
         if isinstance(o, dict):
             for k in list(o):
-                if k in _PII_KEYS: o[k] = "[scrubbed]"
-                else: walk(o[k])
+                if k in redact_keys:
+                    o[k] = "[scrubbed]"
+                elif isinstance(o[k], str):
+                    o[k] = _scrub(o[k])
+                else:
+                    walk(o[k])
         elif isinstance(o, list):
-            for x in o: walk(x)
-    walk(event)  # whole event (message/logentry/breadcrumbs/contexts/extra/request/threads) — "anywhere"
+            for i in range(len(o)):
+                if isinstance(o[i], str):
+                    o[i] = _scrub(o[i])
+                else:
+                    walk(o[i])
+
+    walk(event)
     return event
 
 
 # ---------------------------------------------------------------------------
-# Task 6: SentrySink
+# SentrySink — the alarm (quiet; fires only on flagged turns)
 # ---------------------------------------------------------------------------
 
 def _bucket(u):
     return "high" if (u or 0) >= 0.66 else "med" if (u or 0) >= 0.33 else "low"
+
+
+def _flag_reason(event: dict) -> str:
+    """Sentry grouping key = which reliable probe fired, so distinct failure modes become
+    distinct Issues (a harmful answer and a hallucinated one are triaged differently)."""
+    trackers = event.get("trackers") or {}
+    for tid in ("harmful", "hallucination"):  # priority order — most severe first
+        t = trackers.get(tid)
+        if t and t.get("flag"):
+            return tid
+    return "confident_wrong"
 
 
 class SentrySink:
@@ -113,22 +156,31 @@ class SentrySink:
         if not _sentry_on or not event.get("flag"):   # QUIET: only flagged turns alarm
             return
         import sentry_sdk
+        reason = _flag_reason(event)
+        cognition = {        # default: PII-FREE (labels + scores only)
+            "uncertainty": event.get("uncertainty"),
+            "uncertainty_proj": event.get("uncertainty_proj"),
+            "trackers": event.get("trackers", {}),
+            "top_features": [f["label"] for f in event.get("features", [])],
+        }
+        if config.SENTRY_SEND_IO:   # opt-in PHI gate (default OFF); regex-scrubbed here + in before_send
+            io = event.get("io") or {}
+            cognition["question"] = _scrub(io.get("user_msg", "") or "")
+            cognition["answer"] = _scrub(io.get("response", "") or "")
         with sentry_sdk.new_scope() as scope:
-            scope.fingerprint = ["glassbox", "medical-cognition", "confident_wrong"]
+            scope.fingerprint = ["glassbox", "medical-cognition", reason]
             scope.set_tag("model", event.get("model"))
             scope.set_tag("event_type", "confident_wrong")
+            scope.set_tag("flag_reason", reason)
             scope.set_tag("uncertainty_bucket", _bucket(event.get("uncertainty")))
-            scope.set_context("cognition", {        # PII-FREE — no question/answer
-                "uncertainty": event.get("uncertainty"),
-                "uncertainty_proj": event.get("uncertainty_proj"),
-                "trackers": event.get("trackers", {}),
-                "top_features": [f["label"] for f in event.get("features", [])],
-            })
-            sentry_sdk.capture_message("Confident-wrong medical answer", level=_level(event.get("severity", "warning")))
+            scope.set_context("cognition", cognition)
+            sentry_sdk.capture_message(
+                "Confident-wrong medical answer", level=_level(event.get("severity", "warning"))
+            )
 
 
 # ---------------------------------------------------------------------------
-# Task 7: PhoenixSink + _stage_spans
+# PhoenixSink — redacted span waterfall (epoch-ns; NEVER input/output)
 # ---------------------------------------------------------------------------
 
 try:
@@ -178,7 +230,7 @@ class PhoenixSink:
 
 
 # ---------------------------------------------------------------------------
-# Task 8: StoreSink + _phoenix_is_local + complete init_sponsors
+# StoreSink + local-only Phoenix gate + init_sponsors
 # ---------------------------------------------------------------------------
 
 class StoreSink:
@@ -201,12 +253,16 @@ def init_sponsors() -> None:
     if config.SENTRY_DSN:
         import sentry_sdk
         sentry_sdk.init(
-            dsn=config.SENTRY_DSN, traces_sample_rate=0.0, environment="hackathon",
-            send_default_pii=False,
-            include_local_variables=False,   # CRITICAL: frame locals carry the prompt + io.*
+            dsn=config.SENTRY_DSN,
+            environment=config.SENTRY_ENVIRONMENT,
+            release=config.SENTRY_RELEASE,        # None → Sentry auto-detects git SHA
+            traces_sample_rate=0.0,               # tracing goes to Phoenix (OTel), not Sentry perf
+            send_default_pii=False,               # medical tool: no IPs / headers / PHI by default
+            include_local_variables=False,        # CRITICAL: frame locals carry the prompt + io.*
             include_source_context=False,
             max_request_body_size="never",
-            before_send=_scrub_pii,
+            enable_logs=True,                     # stdlib logging → Sentry (sentry-sdk >= 2.35)
+            before_send=_scrub_pii,               # whole-event scrub (supersedes main's _scrub_event)
         )
         _sentry_on = True
 
@@ -222,7 +278,7 @@ def init_sponsors() -> None:
         except Exception as e:  # noqa: BLE001 — never let a missing sidecar break the app
             print(f"[fanout] Phoenix not initialized ({e}); continuing without it.")
     else:
-        print(f"[fanout] PHOENIX_ENDPOINT is non-local; PhoenixSink disabled (PII fail-closed).")
+        print("[fanout] PHOENIX_ENDPOINT is non-local; PhoenixSink disabled (PII fail-closed).")
 
     if _sentry_on:
         register_sink(SentrySink())
@@ -231,9 +287,6 @@ def init_sponsors() -> None:
 
 async def _claude_judge(event: dict) -> None:
     """Anthropic prize: adjudicate whether a flagged answer is hallucinated; patch the event.
-    Reuse the trait artifact's eval_prompt. Push the verdict to the UI + Sentry/Phoenix
-    out-of-band (it arrives a beat after the answer — that's fine, it's a review signal).
-    DEFERRED — stub only."""
-    # TODO(Lane A/B): anthropic.AsyncAnthropic().messages.create(...) -> Adjudication;
-    #   set event["adjudication"], push to UI channel, optionally re-tag the Sentry Issue.
+    DEFERRED — privacy-killed in cloud (needs the answer); future LOCAL-model slot only."""
+    # TODO(local model): score hallucination from {feature labels, probe scores} only.
     ...

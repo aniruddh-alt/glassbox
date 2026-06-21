@@ -10,14 +10,14 @@ from .. import config
 _sae = None  # set by load_sae()
 
 
-def load_sae(device: str | None = None):
-    """Load the Gemma Scope SAE for the locked layer/width onto the resolved device."""
+def load_sae(layer: int = config.LAYER, device: str | None = None):
+    """Load the Gemma Scope SAE for `layer` (defaults to LAYER=17) onto the resolved device."""
     global _sae
     from sae_lens import SAE
 
     dev = config.resolve_device(device)
     loaded = SAE.from_pretrained(
-        release=config.SAE_RELEASE, sae_id=config.SAE_ID, device=dev
+        release=config.SAE_RELEASE, sae_id=config.sae_id_for_layer(layer), device=dev
     )
     # SAELens has returned either an SAE or a (sae, cfg, sparsity) tuple across versions.
     _sae = loaded[0] if isinstance(loaded, (tuple, list)) else loaded

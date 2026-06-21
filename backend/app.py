@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,19 +16,30 @@ from starlette.concurrency import run_in_threadpool
 from . import config, labels, observability, runtime, sentry_api
 from .analyze import analyze_turn
 from .fanout import fanout, init_sponsors
-
-app = FastAPI(title="GlassBox")
-app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
-)
+from .science import concept_synth as _cs
 
 _TOKEN_CADENCE_S = 0.012  # replay the (already-generated) answer at a readable typing pace
 
 
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Bring up per-request readiness loading + the sponsor observability surfaces at startup.
+
+    runtime.start_loading() kicks off the background model/SAE load (per-request readiness;
+    requests use the synthetic fallback until it's ready). init_sponsors() is the SINGLE
+    sponsor seam (contract #4): Sentry (incident view) + Phoenix (analytics view), each
+    independently optional so a missing DSN or Phoenix sidecar logs a warning and the app
+    still serves.
+    """
     runtime.start_loading()
     init_sponsors()
+    yield
+
+
+app = FastAPI(title="GlassBox", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
 
 
 @app.get("/api/health")
@@ -97,27 +109,34 @@ async def analyze(body: dict):
     return JSONResponse(event.model_dump())
 
 
+def _launch_agent(tracker_id: str) -> None:
+    """Run the blocking agent pipeline off the event loop."""
+    from .agent.interp_agent import run_interp_agent
+
+    def _run():
+        try:
+            run_interp_agent(tracker_id)
+        except Exception as e:  # noqa: BLE001 - surface failure in the job record
+            _cs.update_job(tracker_id, status="error", error=str(e))
+
+    asyncio.create_task(asyncio.to_thread(_run))
+
+
 @app.post("/api/track")
 async def track(body: dict):
-    """Generate a natural-language probe artifact and register it if a direction is supplied."""
-    from .science import concept_synth
-
-    concept = body.get("concept") or body.get("name") or "concept"
-    description = body.get("description") or body.get("prompt")
-    direction = body.get("direction")
-    return await run_in_threadpool(
-        concept_synth.synth_concept,
-        concept,
-        description,
-        direction=direction,
-    )
+    """Submit a natural-language monitoring request. Returns immediately; runs in the bg."""
+    request = body.get("request") or body.get("concept") or body.get("name") or ""
+    tracker_id = _cs.create_job(request)
+    _launch_agent(tracker_id)
+    return {"tracker_id": tracker_id, "status": "pending"}
 
 
 @app.get("/api/track/{tracker_id}")
 async def track_status(tracker_id: str):
-    from .science import concept_synth
-
-    return await run_in_threadpool(concept_synth.tracker_status, tracker_id)
+    job = _cs.get_job(tracker_id)
+    if job is None:
+        return JSONResponse({"status": "unknown"}, status_code=404)
+    return job
 
 
 @app.get("/api/feature/{index}")

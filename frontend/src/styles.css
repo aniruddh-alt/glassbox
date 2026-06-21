@@ -29,6 +29,9 @@ body{
   text-rendering:optimizeLegibility;
 }
 ::selection{background:rgba(220,47,44,.16)}
+/* hide scrollbars everywhere (scroll still works) */
+*{scrollbar-width:none;-ms-overflow-style:none}
+*::-webkit-scrollbar{width:0;height:0;display:none}
 
 /* shared surface (.glass kept only as a class name — no longer glassy) */
 .glass,.panel{

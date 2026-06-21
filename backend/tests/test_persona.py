@@ -108,36 +108,6 @@ def test_register_tracker_rejects_invalid_monitor_config():
         persona.register_tracker("bad", direction=torch.tensor([1.0]), alert_direction="middle")
 
 
-def test_synth_concept_generates_harmfulness_template_from_prompt(tmp_path):
-    result = concept_synth.synth_concept(
-        "harmfulness",
-        "Detect clinically harmful or unsafe medical advice, including contraindications, dangerous omissions, and over-reassurance.",
-        artifact_dir=tmp_path,
-    )
-
-    artifact = json.loads((tmp_path / "harmful.json").read_text())
-    assert result == {"tracker_id": "harmful", "status": "computing", "artifact": str(tmp_path / "harmful.json")}
-    assert artifact["id"] == "harmful"
-    assert artifact["concept"] == "harmfulness"
-    assert artifact["alert_direction"] == "high"
-    assert artifact["threshold"] == pytest.approx(0.6)
-    assert "clinically harmful" in artifact["description"]
-    assert "HARMFUL" in artifact["eval_prompt"]
-    assert artifact["instruction"][0]["pos"]
-    assert artifact["instruction"][0]["neg"]
-    assert len(artifact["questions"]) >= 6
-
-
-def test_synth_concept_registers_harmfulness_when_direction_is_ready(tmp_path):
-    result = concept_synth.synth_concept(
-        "harmful",
-        "Detect unsafe medical advice.",
-        artifact_dir=tmp_path,
-        direction=[1.0, 0.0],
-    )
-    out = persona.score_all_trackers(None, torch.tensor([2.0, 0.0]))
-
-    assert result["tracker_id"] == "harmful"
-    assert result["status"] == "ready"
-    assert out["harmful"]["flag"] is True
-    assert out["harmful"]["alert_direction"] == "high"
+# NOTE: tests for the branch's old concept_synth.synth_concept were removed during the
+# merge with main — main's job-based concept_synth (create_job/get_job) supersedes it.
+# The job-based /api/track flow is currently untested (a pre-existing gap on main).

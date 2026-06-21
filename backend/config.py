@@ -78,9 +78,7 @@ AUTOINTERP_MODEL = os.getenv("AUTOINTERP_MODEL", "claude-haiku-4-5")  # cheap, o
 # feature can be rarer than a dense structural one). 1.0 = disable.
 STRUCTURAL_PENALTY = float(os.getenv("STRUCTURAL_PENALTY", "0.15"))
 
-# --- Family B (probes) ---
 BUILTIN_TRACKERS = ["uncertainty", "harmful", "hallucination"]
-# Thresholds are calibrated offline (validation/) and loaded from science/vectors/thresholds.json.
 DEFAULT_THRESHOLD = 0.5
 
 # --- GPU pod (orchestration → remote torch service) ---
@@ -88,6 +86,11 @@ POD_URL = os.getenv("POD_URL", "").rstrip("/")
 POD_TOKEN = os.getenv("POD_TOKEN", "")
 POD_TIMEOUT = float(os.getenv("POD_TIMEOUT", "120"))
 POD_POLL_INTERVAL = float(os.getenv("POD_POLL_INTERVAL", "5"))
+
+# --- Interpretability Agent ---
+TRACK_AUROC_TAU = float(os.getenv("TRACK_AUROC_TAU", "0.75"))  # deploy gate
+AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-opus-4-8")
+JUDGE_MODEL = os.getenv("JUDGE_MODEL", "claude-opus-4-8")
 
 # --- Runtime ---
 MODE = os.getenv("GLASSBOX_MODE", "posthoc")  # posthoc | live
@@ -114,7 +117,17 @@ Be clear and well-structured. Define abbreviations on first use. When a question
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", _DEFAULT_SYSTEM_PROMPT)
 DEVICE = os.getenv("DEVICE", "cuda")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+# Hackathon default so Sentry works out of the box. Override via the SENTRY_DSN env var
+# (or a .env) — and move it OUT of source before any public/shared deploy: a committed
+# DSN lets anyone who finds it write events into this project. It is NOT read access.
+SENTRY_DSN = os.getenv(
+    "SENTRY_DSN",
+    "https://296000e0a9e12dd30d23a38c373df8eb@o4511600334536704.ingest.us.sentry.io/4511600481206272",
+)
+SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", "hackathon")
+SENTRY_RELEASE = os.getenv("SENTRY_RELEASE") or None  # None → Sentry auto-detects git SHA
+# PHI gate: when false, the raw user_msg/response are NOT attached to Sentry events.
+SENTRY_SEND_IO = os.getenv("SENTRY_SEND_IO", "0").lower() not in ("0", "false", "no", "")
 PHOENIX_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006")
 
 # --- Observability surfaces (read paths + eval) ---
@@ -134,6 +147,12 @@ MASK_TOKENS = ["<bos>", "<start_of_turn>", "<end_of_turn>"]
 # the SAE/layer/dtype are mismatched and the whole feature cloud is noise. Surfaced on /health.
 RECON_MIN_COSINE = float(os.getenv("RECON_MIN_COSINE", "0.85"))
 RECON_PROBE = os.getenv("RECON_PROBE", "Is ibuprofen safe during the third trimester of pregnancy?")
+
+
+def sae_id_for_layer(layer: int = LAYER) -> str:
+    """Gemma Scope width-16k SAE id for a residual `layer` (defaults to LAYER=17).
+    An explicit SAE_ID env var, when set, overrides the per-layer id."""
+    return os.getenv("SAE_ID") or f"layer_{layer}_width_16k_l0_medium"
 
 
 def resolve_device(pref: str | None = None) -> str:

@@ -55,33 +55,6 @@ def test_feature_label(monkeypatch):
     assert r.json()["label"] == "feat-123"
 
 
-def test_track_generates_harmfulness_probe_artifact(monkeypatch, tmp_path):
-    from backend.science import concept_synth
-
-    monkeypatch.setattr(concept_synth, "DEFAULT_ARTIFACT_DIR", tmp_path, raising=False)
-    r = client.post(
-        "/api/track",
-        json={
-            "concept": "harmfulness",
-            "description": "Detect unsafe medical advice and dangerous omissions.",
-        },
-    )
-
-    assert r.status_code == 200
-    body = r.json()
-    assert body["tracker_id"] == "harmful"
-    assert body["status"] == "computing"
-    assert body["artifact"].endswith("harmful.json")
-    assert (tmp_path / "harmful.json").exists()
-
-
-def test_track_status_reports_computing_until_artifact_has_direction(monkeypatch, tmp_path):
-    from backend.science import concept_synth
-
-    monkeypatch.setattr(concept_synth, "DEFAULT_ARTIFACT_DIR", tmp_path, raising=False)
-    client.post("/api/track", json={"concept": "harmfulness", "description": "Detect harm."})
-
-    r = client.get("/api/track/harmful")
-
-    assert r.status_code == 200
-    assert r.json()["status"] == "computing"
+# NOTE: tests for the old synth_concept-based /api/track were removed during the merge with
+# main — main's /api/track is job-based (create_job → pending → background agent). That flow
+# is currently untested (a pre-existing gap on main).

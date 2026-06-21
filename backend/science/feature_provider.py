@@ -1,14 +1,4 @@
-"""Family-A feature source with graceful degradation.
-
-PRIMARY  = LocalSAEProvider  — uses activations you already captured locally (free, fast, GPU).
-FALLBACK = NeuronpediaProvider — post-hoc API for a no-GPU teammate / resilience (rate-limited).
-
-IMPORTANT: this only covers Family A (the exploratory feature cloud). Family B (the reliable
-uncertainty/safety probes) needs RAW residual activations and is LOCAL-ONLY — there is no
-Neuronpedia fallback for it. When running on the fallback, mark the event reliable_signal=False.
-
-OWNER: Lane B (local) + Lane A (provider selection / Neuronpedia HTTP).
-"""
+"""Family-A feature source with graceful degradation."""
 
 from __future__ import annotations
 
@@ -48,7 +38,6 @@ class LocalSAEProvider(FeatureProvider):
     Prefers attribution ranking (needs `grad`); falls back to raw-activation max-pool."""
 
     name = "local"
-    reliable = True
 
     def features_for(
         self,
@@ -96,7 +85,6 @@ class NeuronpediaProvider(FeatureProvider):
     """Fallback for when the local SAE provider is not available."""
 
     name = "neuronpedia"
-    reliable = False
     BASE = "https://www.neuronpedia.org"
 
     def features_for(
