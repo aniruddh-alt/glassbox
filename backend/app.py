@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,18 +16,28 @@ from . import config, labels, runtime
 from .analyze import analyze_turn
 from .fanout import fanout, init_sponsors
 
-app = FastAPI(title="GlassBox")
-app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
-)
-
 _TOKEN_CADENCE_S = 0.012  # replay the (already-generated) answer at a readable typing pace
 
 
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Bring up per-request readiness loading + the sponsor observability surfaces at startup.
+
+    runtime.start_loading() kicks off the background model/SAE load (per-request readiness;
+    requests use the synthetic fallback until it's ready). init_sponsors() is the SINGLE
+    sponsor seam (contract #4): Sentry (incident view) + Phoenix (analytics view), each
+    independently optional so a missing DSN or Phoenix sidecar logs a warning and the app
+    still serves.
+    """
     runtime.start_loading()
     init_sponsors()
+    yield
+
+
+app = FastAPI(title="GlassBox", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
 
 
 @app.get("/api/health")

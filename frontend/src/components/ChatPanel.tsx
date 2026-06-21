@@ -14,7 +14,15 @@ export function ChatPanel({
 }) {
   const [draft, setDraft] = useState("Is ibuprofen safe to take in the third trimester of pregnancy?");
   const threadRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
   const streaming = status === "streaming";
+
+  function autosize() {
+    const t = taRef.current; if (!t) return;
+    t.style.height = "auto";
+    t.style.height = `${Math.min(t.scrollHeight, 140)}px`;
+  }
+  useEffect(autosize, []); // fit the pre-filled question on mount
 
   useEffect(() => {
     const t = threadRef.current;
@@ -51,8 +59,9 @@ export function ChatPanel({
       </div>
       <div className="composer">
         <textarea
+          ref={taRef}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => { setDraft(e.target.value); autosize(); }}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
         />
         <button className={`send ${streaming ? "running" : ""}`} disabled={streaming} onClick={submit}>

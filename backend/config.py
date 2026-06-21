@@ -16,23 +16,35 @@ NP_MODEL = "gemma-3-4b"
 NP_SOURCE = f"{LAYER}-gemmascope-2-res-16k"
 NP_FEATURE_URL = "https://www.neuronpedia.org/api/feature/{model}/{source}/{index}"
 
-# --- Family A (SAE cloud) ---
-TOPK = 15  # top features per token
-TOPK_EVENT = 30  # union cap across tokens in the final event
+TOPK = 15
+TOPK_EVENT = 30
 
-# --- Family B (probes) ---
 BUILTIN_TRACKERS = ["uncertainty", "harmful", "hallucination"]
-# Thresholds are calibrated offline (validation/) and loaded from science/vectors/thresholds.json.
 DEFAULT_THRESHOLD = 0.5
 
-# --- Runtime ---
-MODE = os.getenv("GLASSBOX_MODE", "posthoc")  # posthoc | live
+MODE = os.getenv("GLASSBOX_MODE", "posthoc")
 DEVICE = os.getenv("DEVICE", "cuda")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+# Hackathon default so Sentry works out of the box. Override via the SENTRY_DSN env var
+# (or a .env) — and move it OUT of source before any public/shared deploy: a committed
+# DSN lets anyone who finds it write events into this project. It is NOT read access.
+SENTRY_DSN = os.getenv(
+    "SENTRY_DSN",
+    "https://296000e0a9e12dd30d23a38c373df8eb@o4511600334536704.ingest.us.sentry.io/4511600481206272",
+)
+SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", "hackathon")
+SENTRY_RELEASE = os.getenv("SENTRY_RELEASE") or None  # None → Sentry auto-detects git SHA
+# PHI gate: when false, the raw user_msg/response are NOT attached to Sentry events.
+SENTRY_SEND_IO = os.getenv("SENTRY_SEND_IO", "1").lower() not in ("0", "false", "no", "")
 PHOENIX_ENDPOINT = os.getenv("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006")
 
 MASK_TOKENS = ["<bos>", "<start_of_turn>", "<end_of_turn>"]
+
+
+def sae_id_for_layer(layer: int = LAYER) -> str:
+    """Gemma Scope width-16k SAE id for a residual `layer` (defaults to LAYER=17).
+    An explicit SAE_ID env var, when set, overrides the per-layer id."""
+    return os.getenv("SAE_ID") or f"layer_{layer}_width_16k_l0_medium"
 
 
 def resolve_device(pref: str | None = None) -> str:

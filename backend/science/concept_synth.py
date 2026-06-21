@@ -1,9 +1,5 @@
-"""User-defined concepts on demand. User names a concept → contrastive pairs (Oumi/Claude)
-→ persona vector at layer 12 → cached tracker. SAE features are a FIXED dictionary; persona
-vectors are what make arbitrary user concepts trackable.
+"""User-defined concepts on demand."""
 
-OWNER: Lane B.
-"""
 from __future__ import annotations
 
 

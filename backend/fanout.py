@@ -16,11 +16,37 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 from . import config
 
 _tracer = None  # Phoenix OTEL tracer, set in init_sponsors()
 _sentry_on = False
+
+# Structured-PII patterns scrubbed from any cognition free-text before it leaves the box.
+_PII = [
+    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "[email]"),
+    (re.compile(r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b"), "[phone]"),
+    (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[ssn]"),
+]
+
+
+def _scrub(s: str) -> str:
+    for pat, repl in _PII:
+        s = pat.sub(repl, s)
+    return s
+
+
+def _scrub_event(event, _hint):
+    """Sentry before_send hook (defense-in-depth PHI redaction). Catches emails/phones/
+    SSNs in the cognition free-text — NOT unstructured identifiers like names. For real
+    PHI, gate the raw text off entirely (SENTRY_SEND_IO=0) or de-identify upstream."""
+    cog = (event.get("contexts") or {}).get("cognition")
+    if isinstance(cog, dict):
+        for k in ("question", "answer"):
+            if isinstance(cog.get(k), str):
+                cog[k] = _scrub(cog[k])
+    return event
 
 
 def init_sponsors() -> None:
@@ -34,9 +60,12 @@ def init_sponsors() -> None:
 
         sentry_sdk.init(
             dsn=config.SENTRY_DSN,
-            traces_sample_rate=0.0,  # we emit our own spans to Phoenix, not Sentry perf
-            environment="hackathon",
-            send_default_pii=False,
+            environment=config.SENTRY_ENVIRONMENT,
+            release=config.SENTRY_RELEASE,  # None → auto-detect git SHA
+            traces_sample_rate=0.0,  # tracing goes to Phoenix (OTel), not Sentry perf
+            send_default_pii=False,  # medical tool: no IPs / headers / PHI by default
+            enable_logs=True,  # stdlib logging → Sentry (sentry-sdk >= 2.35)
+            before_send=_scrub_event,  # defense-in-depth PHI redaction
         )
         _sentry_on = True
 
@@ -76,30 +105,42 @@ def _bucket(u: float) -> str:
     return "high" if u >= 0.66 else "med" if u >= 0.33 else "low"
 
 
+def _flag_reason(event: dict) -> str:
+    """Sentry grouping key = which reliable probe fired. Distinct failure modes become
+    distinct Issues (a harmful answer and a hallucinated one are triaged differently)."""
+    trackers = event.get("trackers", {})
+    for tid in ("harmful", "hallucination"):  # priority order — most severe first
+        t = trackers.get(tid)
+        if t and t.get("flag"):
+            return tid
+    return "confident_wrong" if event.get("flag") else "ok"
+
+
 def _to_sentry(event: dict) -> None:
-    """One Sentry Issue per failure mode. fingerprint groups all confident-wrong events
-    into a single trackable Issue; the cognition payload rides along as context."""
+    """One Sentry Issue per failure mode. fingerprint groups repeats of the SAME failure
+    mode into a single trackable Issue; the cognition payload rides along as context."""
     if not _sentry_on:
         return
     import sentry_sdk
 
-    event_type = "confident_wrong" if event["flag"] else "ok"
+    reason = _flag_reason(event)
+    cognition = {
+        "uncertainty": event["uncertainty"],
+        "uncertainty_proj": event["uncertainty_proj"],
+        "trackers": event["trackers"],
+        "top_features": [f["label"] for f in event["features"]],
+    }
+    if config.SENTRY_SEND_IO:  # PHI gate (scrubbed again in before_send)
+        cognition["question"] = event["io"]["user_msg"]
+        cognition["answer"] = event["io"]["response"]
+
     with sentry_sdk.new_scope() as scope:
-        scope.fingerprint = ["glassbox", "medical-cognition", event_type]
+        scope.fingerprint = ["glassbox", "medical-cognition", reason]
         scope.set_tag("model", event["model"])
-        scope.set_tag("event_type", event_type)
+        scope.set_tag("event_type", "confident_wrong" if event["flag"] else "ok")
+        scope.set_tag("flag_reason", reason)
         scope.set_tag("uncertainty_bucket", _bucket(event["uncertainty"]))
-        scope.set_context(
-            "cognition",
-            {
-                "uncertainty": event["uncertainty"],
-                "uncertainty_proj": event["uncertainty_proj"],
-                "trackers": event["trackers"],
-                "top_features": [f["label"] for f in event["features"]],
-                "question": event["io"]["user_msg"],
-                "answer": event["io"]["response"],
-            },
-        )
+        scope.set_context("cognition", cognition)
         # Only flagged answers should surface as alerts; "ok" turns into a quiet info Issue.
         sentry_sdk.capture_message(
             "Confident-wrong medical answer" if event["flag"] else "cognition ok",
