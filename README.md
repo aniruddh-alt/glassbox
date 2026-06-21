@@ -9,15 +9,15 @@
 
 ## The one-paragraph architecture
 
-A clinician chats with `gemma-2-2b-it` over **POST + NDJSON** (never SSE — it breaks through Cloudflare). On the GPU, the model generates while **one forward hook on `model.model.layers[12]`** captures the residual stream. That single activation feeds **two method families**:
+A clinician chats with `unsloth/gemma-3-4b-it` over **POST + NDJSON** (never SSE — it breaks through Cloudflare). On the GPU, the model generates while **one forward hook on `model.model.layers[17]`** captures the residual stream. That single activation feeds **two method families**:
 
-- **Family A — SAE feature cloud** (Gemma Scope `layer_12/width_16k`): top-k firing features → the exploratory "what's lighting up" view. *Labels are auto-interp and unreliable — always shown with caveats.*
-- **Family B — persona-vector probes** (diff-of-means + calibrated logistic regression at layer 12): the **reliable** uncertainty / harmful / hallucination scores, plus **user-defined concepts** computed on demand.
+- **Family A — SAE feature cloud** (Gemma Scope `layer_17/width_16k`): top-k firing features → the exploratory "what's lighting up" view. *Labels are auto-interp and unreliable — always shown with caveats.*
+- **Family B — persona-vector probes** (diff-of-means + calibrated logistic regression at layer 17): the **reliable** uncertainty / harmful / hallucination scores, plus **user-defined concepts** computed on demand. *(In progress — scores emit `null` until probes are trained.)*
 
 Downstream on **CPU**, the FastAPI handler assembles **exactly one `cognition_event`** per message and fans it out to four consumers that never touch the GPU: **Sentry** (Issue), **Arize Phoenix** (span + eval), the **chat UI**, and **Claude** (auto-interp labels + async adjudication of flagged events).
 
 ```
-UI ──POST /api/chat──▶ [GPU] gemma-2-2b-it generate + layer-12 hook
+UI ──POST /api/chat──▶ [GPU] gemma-3-4b-it generate + layer-17 hook
                             │  (one residual activation)
                 ┌───────────┴───────────┐
         [GPU] SAE top-k          [GPU] persona-vector probes
@@ -29,7 +29,7 @@ UI ──POST /api/chat──▶ [GPU] gemma-2-2b-it generate + layer-12 hook
       Sentry    Phoenix          chat UI       Claude judge (async, if flagged)
 ```
 
-**Model decision (LOCKED):** `gemma-2-2b-it` + Gemma Scope. Llama-3.1-8b was rejected — Neuronpedia label coverage is a verified tie, so 8b's ~4× VRAM / ~3–4× slower tok/s buys nothing, and the safety signal (Family B) is model-agnostic.
+**Model decision (LOCKED):** `unsloth/gemma-3-4b-it` (layer 17) + Gemma Scope. `unsloth/gemma-3-4b-it` is ungated and loads without a HuggingFace token. Llama-3.1-8b was rejected — Neuronpedia label coverage is a verified tie, so 8b's ~4× VRAM / ~3–4× slower tok/s buys nothing, and the safety signal (Family B) is model-agnostic.
 
 ---
 
@@ -45,18 +45,32 @@ UI ──POST /api/chat──▶ [GPU] gemma-2-2b-it generate + layer-12 hook
 ## Quickstart
 
 ```bash
-# Backend (GPU box)
-cd backend && pip install -r requirements.txt
-cp ../.env.example ../.env          # fill in ANTHROPIC_API_KEY, SENTRY_DSN
-huggingface-cli login               # gemma-2-2b-it is gated (or use unsloth/gemma-2-2b-it)
-bash ../scripts/run_api.sh          # uvicorn on :8000
+# 1. Install dependencies
+uv sync                   # light install (no ML stack — runs in synthetic fallback mode)
+uv sync --extra ml        # full install (torch + sae_lens — required for real SAE activations)
 
-# Observability (CPU, same host)
+# 2. Configure environment
+cp .env.example .env      # fill in ANTHROPIC_API_KEY; SENTRY_DSN is optional
+
+# 3. Start the backend  (port 8000)
+uv run uvicorn backend.app:app --port 8000
+#  → Without the ml extra (or when model weights are absent), the backend
+#    automatically falls back to synthetic mode: health reports "mode":"fallback",
+#    features are generated synthetically, and uncertainty scores are null.
+#  → With the ml extra and weights present, health reports "mode":"real".
+
+# 4. (Optional) Observability stack
 bash scripts/run_phoenix.sh         # Arize Phoenix UI on :6006
 
-# Frontend
+# 5. Frontend
 cd frontend && npm install && npm run dev   # Vite on :5173, proxies /api -> :8000
 ```
+
+**Verify startup:** `curl -s localhost:8000/api/health` should return:
+```json
+{"mode":"fallback","model":"unsloth/gemma-3-4b-it","layer":17,"trackers":[]}
+```
+(or `"mode":"real"` with the full ml stack).
 
 `GLASSBOX_MODE=posthoc` (default) analyzes each completed turn; `GLASSBOX_MODE=live` streams per-token features. **Demo runs local** — do not stream through a RunPod/Cloudflare proxy.
 
