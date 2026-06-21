@@ -72,7 +72,9 @@ def fanout(event: dict) -> None:
         # _notify_fetch_uagent(event)   # stretch
 
 
-def _bucket(u: float) -> str:
+def _bucket(u: float | None) -> str:
+    if u is None:
+        return "unknown"
     return "high" if u >= 0.66 else "med" if u >= 0.33 else "low"
 
 
@@ -117,7 +119,8 @@ def _to_phoenix(event: dict) -> None:
     ) as span:
         span.set_attribute("input.value", event["io"]["user_msg"])
         span.set_attribute("output.value", event["io"]["response"])
-        span.set_attribute("cognition.uncertainty", float(event["uncertainty"]))
+        if event["uncertainty"] is not None:
+            span.set_attribute("cognition.uncertainty", float(event["uncertainty"]))
         span.set_attribute("cognition.flag", bool(event["flag"]))
         span.set_attribute("cognition.severity", event["severity"])
         span.set_attribute(

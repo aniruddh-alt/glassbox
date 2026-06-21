@@ -6,6 +6,7 @@ export interface Health {
   layer: number;
   model_loaded: boolean;
   sae_loaded: boolean;
+  d_sae: number;
   trackers: string[];
 }
 

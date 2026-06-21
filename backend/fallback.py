@@ -38,6 +38,17 @@ def _topic(messages: list[dict]) -> str:
     return "this question"
 
 
+def is_synthetic_response(text: str) -> bool:
+    """True if the answer matches fallback.synth_turn template output."""
+    markers = (
+        "That's an important clinical question about",
+        "Good question regarding",
+        "Regarding ",
+        ": the considerations are nuanced",
+    )
+    return any(m in text for m in markers)
+
+
 def synth_turn(messages: list[dict]) -> tuple[str, list[dict]]:
     """Return a deterministic (answer, features) for the given conversation."""
     seed = _seed(messages)

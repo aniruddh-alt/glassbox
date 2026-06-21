@@ -1,71 +1,104 @@
-"""Backend readiness. A background thread tries to load the real model + SAE; until/unless
-that succeeds, requests use the synthetic fallback. State is read per-request by the API.
+"""Backend readiness. Polls the GPU pod when POD_URL is set; otherwise stays on synthetic fallback.
+State is read per-request by the API.
 
 OWNER: Lane A. Importing this module must NOT import torch (Global Constraint).
 """
 
 from __future__ import annotations
 
+import os
 import threading
+import time
 
 from . import config
 
-STATE: dict = {"mode": "loading", "model_loaded": False, "sae_loaded": False}
+STATE: dict = {
+    "mode": "loading",
+    "model_loaded": False,
+    "sae_loaded": False,
+    "pod_reachable": False,
+    "pod_health": None,
+}
 
 
-def _torch_available() -> bool:
-    try:
-        import torch  # noqa: F401
-
-        return True
-    except Exception:
-        return False
-
-
-def _default_load_engine() -> None:
-    from . import engine
-
-    engine.load_engine()
-
-
-def _default_load_sae() -> None:
-    from .science import sae
-
-    sae.load_sae()
-
-
-def _attempt_load(*, torch_available=None, load_engine=None, load_sae=None) -> dict:
-    """Try to bring the real path online. Never raises — failure => fallback."""
-    avail = _torch_available() if torch_available is None else torch_available
-    if not avail:
+def _apply_pod_health(h: dict | None, *, reachable: bool) -> dict:
+    STATE["pod_reachable"] = reachable
+    STATE["pod_health"] = h
+    if not reachable or h is None:
         STATE.update(mode="fallback", model_loaded=False, sae_loaded=False)
         return dict(STATE)
-    try:
-        (load_engine or _default_load_engine)()
-        STATE["model_loaded"] = True
-        (load_sae or _default_load_sae)()
-        STATE["sae_loaded"] = True
+    STATE["model_loaded"] = bool(h.get("model_loaded"))
+    STATE["sae_loaded"] = bool(h.get("sae_loaded"))
+    STATE["sae_recon_cosine"] = h.get("sae_recon_cosine")
+    STATE["sae_recon_ok"] = h.get("sae_recon_ok")
+    if h.get("mode") == "real" and STATE["model_loaded"] and STATE["sae_loaded"]:
         STATE["mode"] = "real"
-    except Exception as e:  # noqa: BLE001 — degrade, never crash the app
-        print(f"[runtime] real load failed ({e}); using synthetic fallback")
-        STATE.update(mode="fallback")
+    elif h.get("mode") == "loading":
+        STATE["mode"] = "loading"
+    else:
+        STATE["mode"] = "fallback"
     return dict(STATE)
 
 
+def _poll_pod_once() -> dict:
+    """Fetch pod /health once. Never raises."""
+    if not config.POD_URL:
+        return _apply_pod_health(None, reachable=False)
+    try:
+        from . import pod_client
+
+        return _apply_pod_health(pod_client.health(), reachable=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[runtime] pod health poll failed ({e})")
+        return _apply_pod_health(None, reachable=False)
+
+
+def _pod_poll_loop() -> None:
+    while True:
+        _poll_pod_once()
+        time.sleep(config.POD_POLL_INTERVAL)
+
+
+def refresh_pod_health() -> dict:
+    """Re-check pod readiness (e.g. after a failed turn)."""
+    return _poll_pod_once()
+
+
 def start_loading() -> None:
-    """Kick off the load off the request path. Called once at FastAPI startup."""
+    """Bring the real path online. Called once at FastAPI startup.
+
+    When POD_URL is set, poll the GPU pod (background thread by default, or synchronously
+    when GLASSBOX_EAGER_LOAD=1). When POD_URL is unset, stay on synthetic fallback.
+    """
+    if not config.POD_URL:
+        STATE.update(
+            mode="fallback",
+            model_loaded=False,
+            sae_loaded=False,
+            pod_reachable=False,
+            pod_health=None,
+        )
+        return
+
     STATE["mode"] = "loading"
-    threading.Thread(target=_attempt_load, daemon=True).start()
+    if os.getenv("GLASSBOX_EAGER_LOAD") == "1":
+        _poll_pod_once()
+    else:
+        threading.Thread(target=_pod_poll_loop, daemon=True).start()
 
 
 def health_payload() -> dict:
-    from .science.persona import _trackers
-
+    ph = STATE.get("pod_health") or {}
     return {
         "mode": STATE["mode"],
         "model_loaded": STATE["model_loaded"],
         "sae_loaded": STATE["sae_loaded"],
         "model": config.MODEL_ID,
         "layer": config.LAYER,
-        "trackers": list(_trackers.keys()),
+        "d_sae": ph.get("d_sae", config.D_SAE),
+        "trackers": ph.get("trackers", []),
+        "sae_recon_cosine": STATE.get("sae_recon_cosine", ph.get("sae_recon_cosine")),
+        "sae_recon_ok": STATE.get("sae_recon_ok", ph.get("sae_recon_ok")),
+        "pod_reachable": STATE.get("pod_reachable", False),
+        "pod_url_configured": bool(config.POD_URL),
     }

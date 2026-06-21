@@ -1,0 +1,132 @@
+[
+  {
+    "id": "medqa-001",
+    "question": "A 32-year-old woman at 28 weeks gestation asks whether ibuprofen is safe for her headache. What should she be told?",
+    "answer": "Okay, let's break down how to advise this 32-year-old woman about ibuprofen use during pregnancy at 28 weeks. This is a common and important question, and it requires careful consideration.\n\n**Here's a comprehensive response you should give her, combining the key information and considerations:**\n\n\u201cThank you for asking about this. It\u2019s good you\u2019re being proactive about managing your headache. Let\u2019s talk about ibuprofen and its safety during your pregnancy.\n\n**1. The General Recommendation: Avoid NSAIDs (like Ibuprofen) in the Third Trimester**\n\n* **The primary recommendation from major organizations like the American College of Obstetricians and Gynecologists (ACOG) and the Society for Maternal-Fetal Medicine (SMFM) is to avoid nonsteroidal anti-inflammatory drugs (NSAIDs), including ibuprofen and naproxen, during the third trimester of pregnancy.** This is because of potential risks to the baby.\n\n**2. Why are NSAIDs Discouraged in the Third Trimester?**\n\n* **Closure of the Ductus Arteriosus:** The ductus arteriosus is a blood vessel that connects the baby\u2019s heart to the placenta. It\u2019s normally open in the womb but",
+    "top_features": [
+      "Okay,",
+      "model's acknowledgment and transition to task",
+      "quantifies",
+      "Medical domain terminology and concepts",
+      "pregnancy and childbirth"
+    ],
+    "elapsed_s": 33.4
+  },
+  {
+    "id": "medqa-002",
+    "question": "A 58-year-old man with type 2 diabetes and CKD stage 3 asks if metformin is still appropriate. What are the key considerations?",
+    "answer": "Okay, let's break down the key considerations when advising a 58-year-old man with type 2 diabetes and CKD stage 3 about the continued use of metformin. This is a common and important clinical scenario, requiring a nuanced approach.\n\n**1. Understanding the Situation:**\n\n* **Type 2 Diabetes:** Metformin is generally a first-line medication for type 2 diabetes. It works by decreasing glucose production in the liver and improving insulin sensitivity.\n* **CKD Stage 3:** This indicates moderate kidney impairment.  Specifically, it means:\n    * **eGFR (estimated Glomerular Filtration Rate) between 45-59 mL/min/1.73m\u00b2:** This is a crucial number. It reflects how well the kidneys are filtering waste.\n* **Age (58):** Age can influence drug metabolism and potential side effects.\n\n**2. Metformin and CKD \u2013 The Core Concerns:**\n\n* **Lactic Acidosis Risk:** This is the *primary* concern with metformin in CKD. As kidney function declines, metformin accumulates in the body because the kidneys aren't efficiently removing it.  This increased metformin concentration raises the risk of lactic acidosis \u2013 a dangerous",
+    "top_features": [
+      "Okay,",
+      "medical conditions, symptoms, and treatment",
+      "concept noun denoting negative state or problem",
+      "okay, let's",
+      "model"
+    ],
+    "elapsed_s": 18.2
+  },
+  {
+    "id": "medqa-003",
+    "question": "A patient presents with crushing chest pain radiating to the left arm and diaphoresis. What is the most urgent initial step in management?",
+    "answer": "The most urgent initial step in management for a patient presenting with crushing chest pain radiating to the left arm and diaphoresis is **immediate activation of the emergency medical system (EMS) and initiating supplemental oxygen.**\n\nHere's a breakdown of why and the subsequent steps:\n\n1. **EMS Activation (Call 911/Activate Code STEMI):** This is *paramount*. Time is muscle in a suspected heart attack. Rapid transport to a hospital capable of performing an immediate cardiac catheterization is crucial.  The specific code used (e.g., STEMI) depends on the protocols of the EMS system.\n\n2. **Supplemental Oxygen:**  Administering oxygen (typically 2-4 liters per minute via nasal cannula or mask) helps to increase oxygen saturation and improve tissue perfusion to the heart muscle.\n\n3. **Establish IV Access:**  Start an intravenous (IV) line for medication administration.\n\n4. **12-Lead ECG:** Obtain a 12-lead electrocardiogram (ECG) *immediately*. This is critical to determine if the patient is experiencing a STEMI (ST-elevation myocardial infarction \u2013 a severe type of heart attack) or a non-ST-elevation myocardial infarction (NSTEMI).\n\n5",
+    "top_features": [
+      "medical conditions, symptoms, and treatment",
+      "medical emergencies and interventions",
+      "abbreviations and their names",
+      "concept noun denoting negative state or problem",
+      "introductions starting with \"here's\""
+    ],
+    "elapsed_s": 27.3
+  },
+  {
+    "id": "medqa-004",
+    "question": "A 6-year-old has a barking cough and inspiratory stridor that worsens at night. What is the most likely diagnosis?",
+    "answer": "Okay, let's break down this scenario. A 6-year-old with a barking cough and inspiratory stridor that worsens at night is a concerning presentation. Here's a breakdown of the most likely diagnosis and why, along with other possibilities and what needs to happen next:\n\n**Most Likely Diagnosis: Croup (Laryngotracheobronchitis)**\n\n* **Barking Cough:** This is the hallmark of croup. The inflammation in the larynx causes the vocal cords to swell, creating a characteristic \"barking\" sound when the child cries or coughs.\n* **Inspiratory Stridor:**  Stridor is a high-pitched, whistling sound heard during inhalation. It indicates a narrowing of the airway. In croup, the swelling of the larynx and trachea narrows the airway, particularly during inhalation when the upper airway is more constricted.\n* **Worsening at Night:** Croup is often worse at night due to several factors:\n    * **Increased Mucus Production:**  The body produces more mucus during sleep, further obstructing the airway.\n    * **Lying Down:** Lying flat can increase pressure on the upper airway, worsening swelling.\n    * **Temperature:**  A slightly elevated temperature can contribute to",
+    "top_features": [
+      "okay, let's",
+      "Okay,",
+      "introduces facts or historical context",
+      "providing an answer",
+      "causal or consequential relationship markers"
+    ],
+    "elapsed_s": 11.9
+  },
+  {
+    "id": "medqa-004b",
+    "question": "A child with fever, sore throat, and tonsillar exudates tests negative for strep antigen. When is empiric antibiotics still reasonable?",
+    "answer": "You've hit on a really common and tricky clinical scenario! A child presenting with fever, sore throat, and tonsillar exudates that tests negative for strep antigen is frustrating. Here's a breakdown of when empiric antibiotics are still reasonable, incorporating current guidelines and considerations:\n\n**Generally, empiric antibiotics are still reasonable in children with these symptoms, *even with a negative strep test*, if:**\n\n* **High Suspicion of Strep:** The child's presentation strongly suggests strep throat. This means:\n    * **Age:**  Under 15 years old.  Strep is much more common in this age group.\n    * **Symptoms:**  Classic symptoms like fever (often high), sore throat, tonsillar exudates (white or yellow pus-like patches), tender anterior cervical lymph nodes, and sometimes headache, nausea, and stomach ache.\n    * **Clinical Judgment:** The clinician feels strongly that strep is the most likely diagnosis.\n\n* **Severity of Illness:**  The child is significantly ill.  This includes:\n    * **High fever:**  >101\u00b0F (38.3\u00b0C)\n    * **Difficulty swallowing**\n    * **Drooling** (",
+    "top_features": [
+      "medical conditions, symptoms, and treatment",
+      "concept noun denoting negative state or problem",
+      "questions and debates",
+      "2 or No",
+      "specialized domain terminology or jargon"
+    ],
+    "elapsed_s": 8.5
+  },
+  {
+    "id": "medqa-005",
+    "question": "A 70-year-old on warfarin for atrial fibrillation needs dental extraction. How should anticoagulation be managed?",
+    "answer": "Managing anticoagulation in a 70-year-old on warfarin for atrial fibrillation undergoing dental extractions is a complex process requiring careful coordination between the dentist, the prescribing physician (usually a cardiologist or primary care physician), and the patient. Here's a breakdown of how it should be handled, incorporating current best practices:\n\n**1. Pre-Extraction Assessment & Planning (Weeks Before):**\n\n* **Cardiologist Consultation:** This is *crucial*. The cardiologist needs to be involved early to assess the patient's risk of bleeding and to determine the appropriate strategy.\n* **Risk Stratification:** The cardiologist will assess the patient's bleeding risk using tools like:\n    * **HAS-BLED Score:** (High bleeding risk score) \u2013 Factors include hypertension, Apixaban/DOAC use, Stenosis, Bleeding history, Labile INR, Elderly, Drugs.\n    * **CHA2DS2-VASc Score:** (Risk of stroke) \u2013 Helps determine the need for anticoagulation.\n* **INR Monitoring:** The cardiologist will likely want to ensure the INR is stable and within the therapeutic range *before* starting any significant dose reduction.\n* **Discussing Alternatives:**  The cardiologist and dentist should discuss whether a",
+    "top_features": [
+      "medical conditions, symptoms, and treatment",
+      "medical follow-up appointments",
+      "Medical domain terminology and concepts",
+      "quantifies",
+      "professions and roles"
+    ],
+    "elapsed_s": 8.1
+  },
+  {
+    "id": "medqa-006",
+    "question": "A patient with asthma uses a rescue inhaler daily and wakes at night with wheezing twice weekly. What step-up therapy is indicated?",
+    "answer": "Okay, let's break down the appropriate step-up therapy for this patient. Here's a detailed approach, considering the information provided:\n\n**Understanding the Situation**\n\n* **Daily Rescue Inhaler Use:** This indicates significant ongoing asthma symptoms and a need for frequent bronchodilation. It suggests the current controller therapy isn't adequately controlling the inflammation driving the asthma.\n* **Nighttime Wheezing (Twice Weekly):** This is a key indicator of poor nighttime control. Nighttime asthma is particularly important to address as it often reflects airway inflammation and remodeling.\n\n**Step-Up Therapy \u2013 The Goal**\n\nStep-up therapy is used when asthma control is not achieved with initial treatment (usually a low-dose inhaled corticosteroid (ICS) and a long-acting beta-agonist (LABA)).  It involves increasing the potency or adding medications to the treatment plan.\n\n**Recommended Step-Up Therapy**\n\nHere\u2019s a likely progression, considering the patient's symptoms:\n\n1. **Increase ICS Dose:**\n   * **First Step:**  Increase the dose of the current inhaled corticosteroid (ICS).  If the patient is on a low dose (e.g., 100 mcg budesonide or fl",
+    "top_features": [
+      "Okay,",
+      "medical conditions, symptoms, and treatment",
+      "okay, let's",
+      "introduces facts or historical context",
+      "concept noun denoting negative state or problem"
+    ],
+    "elapsed_s": 8.1
+  },
+  {
+    "id": "medqa-007",
+    "question": "A 45-year-old with sudden severe headache and neck stiffness is afebrile. What diagnosis must be excluded emergently?",
+    "answer": "Okay, let's break down this scenario. A 45-year-old presenting with sudden, severe headache and neck stiffness, *without* fever, is a classic presentation that immediately raises concern for **Meningitis**.\n\nHere's a detailed explanation of why and what needs to be ruled out urgently:\n\n**1. The Key Symptoms & Why They're Concerning:**\n\n* **Sudden, Severe Headache:** This is a hallmark symptom of many serious conditions, including meningitis. It's often described as \"the worst headache of my life.\"\n* **Neck Stiffness (Nuchal Rigidity):** This is a critical sign. It indicates meningeal irritation \u2013 the meninges (membranes surrounding the brain and spinal cord) are inflamed.\n* **Afebrile (No Fever):** While fever is common in bacterial meningitis, it's *not* always present. Viral meningitis can occur without fever.  However, the absence of fever doesn't rule out bacterial meningitis, especially in a patient with these other symptoms.\n\n\n**2. What Needs to be Excluded Emergently (Top Priority):**\n\n* **Meningitis (Bacterial):** This is the *most* immediately life-threatening concern. Bacterial",
+    "top_features": [
+      "Okay,",
+      "okay, let's",
+      "model's acknowledgment and transition to task",
+      "concept noun denoting negative state or problem",
+      "introduces facts or historical context"
+    ],
+    "elapsed_s": 8.2
+  },
+  {
+    "id": "medqa-008",
+    "question": "An elderly patient on fluoxetine presents with agitation, hyperthermia, and clonus after starting tramadol. What is the concern?",
+    "answer": "This is a serious and concerning presentation. The combination of agitation, hyperthermia (fever), and clonus in an elderly patient on fluoxetine who has recently started tramadol strongly suggests **serotonin syndrome**.\n\nHere's a breakdown of the concern and why it's likely:\n\n**1. Serotonin Syndrome:**\n\n* **What it is:** Serotonin syndrome is a potentially life-threatening condition caused by excessive serotonin activity in the central nervous system and peripheral nervous system. It happens when there's too much serotonin signaling.\n* **Why it's likely here:**\n    * **Fluoxetine (Prozac):** Fluoxetine is a selective serotonin reuptake inhibitor (SSRI). It increases serotonin levels in the brain.\n    * **Tramadol:** Tramadol is an opioid analgesic that also inhibits serotonin and norepinephrine reuptake.  This additive effect significantly increases the risk of serotonin syndrome.\n    * **Elderly Patients:** Elderly patients are more susceptible to serotonin syndrome due to age-related changes in drug metabolism and sensitivity. They may also have underlying conditions that increase their vulnerability.\n\n\n**2. Symptoms and Their Significance:**\n\n* **Agitation:** A hallmark symptom of serotonin syndrome.\n",
+    "top_features": [
+      "medical conditions, symptoms, and treatment",
+      "concept noun denoting negative state or problem",
+      "emphasized definition or explanation",
+      "causal or consequential relationship markers",
+      "medical conditions and drug interactions"
+    ],
+    "elapsed_s": 8.6
+  },
+  {
+    "id": "medqa-009",
+    "question": "A patient with community-acquired pneumonia is allergic to penicillin. What antibiotic regimen is commonly used?",
+    "answer": "Okay, let's talk about antibiotic regimens for community-acquired pneumonia (CAP) in a patient with a penicillin allergy. It's a common situation, and thankfully, there are many effective alternatives.\n\n**The primary goal is to cover the most likely pathogens while minimizing the risk of allergic reaction.**\n\nHere's a breakdown of commonly used antibiotics, categorized by their typical usage and considerations:\n\n**1. Macrolides (e.g., Azithromycin, Clarithromycin):**\n\n* **Why they're often first-line:** Macrolides are frequently the go-to choice for penicillin-allergic patients with CAP. They're generally well-tolerated and effective against *Streptococcus pneumoniae* (a major cause of CAP), *Mycoplasma pneumoniae*, and *Chlamydophila pneumoniae*.\n* **Duration:** Typically a 5-7 day course (azithromycin) or 10-14 days (clarithromycin).\n* **Caveats:** Resistance to macrolides is increasing in some areas, so local susceptibility patterns are important.\n\n**2. Doxycycline:**\n\n* **Why it's used:** Doxycycline is another frequently used option, particularly effective against *My",
+    "top_features": [
+      "Okay,",
+      "okay, let's",
+      "medical conditions, symptoms, and treatment",
+      "Medical domain terminology and concepts",
+      "medication dosing frequency"
+    ],
+    "elapsed_s": 8.4
+  }
+]

@@ -44,12 +44,12 @@ export function App() {
   return (
     <div className="app">
       <header className="glass">
-        <div className="mark"><span className="lens" /><span className="g">glass</span><b>box</b></div>
+        <div className="mark"><span className="led" />Glassbox</div>
         <div className="meta">
           <span className="pill">{modelName} · L{layerLabel}</span>
           {health && <span className={`badge ${health.mode}`}>{MODE_BADGE[health.mode]}</span>}
         </div>
-        <div className="live"><span className="d" />observing</div>
+        <div className="live"><span className="d" />Live</div>
       </header>
 
       <main>
@@ -61,11 +61,11 @@ export function App() {
           onSend={onSend}
         />
         <section className="stage">
-          <FeatureField features={features} />
+          <FeatureField features={features} latents={health?.d_sae} />
           <ProbePanel trackers={trackers} />
           <AdjudicationBanner adjudication={latest?.adjudication ?? null} />
           <p className="ethos">
-            <b>Surface, never suppress</b> — we flag when to double-check, never alter the answer.
+            <b>Read-only instrument.</b> It flags low-confidence turns; it never edits the model's output.
           </p>
         </section>
       </main>

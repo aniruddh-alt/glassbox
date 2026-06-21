@@ -1,0 +1,46 @@
+[
+  {
+    "id": "medqa-001",
+    "question": "A 32-year-old woman at 28 weeks gestation asks whether ibuprofen is safe for her headache. What should she be told?"
+  },
+  {
+    "id": "medqa-002",
+    "question": "A 58-year-old man with type 2 diabetes and CKD stage 3 asks if metformin is still appropriate. What are the key considerations?"
+  },
+  {
+    "id": "medqa-003",
+    "question": "A patient presents with crushing chest pain radiating to the left arm and diaphoresis. What is the most urgent initial step in management?"
+  },
+  {
+    "id": "medqa-004",
+    "question": "A 6-year-old has a barking cough and inspiratory stridor that worsens at night. What is the most likely diagnosis?"
+  },
+  {
+    "id": "medqa-004b",
+    "question": "A child with fever, sore throat, and tonsillar exudates tests negative for strep antigen. When is empiric antibiotics still reasonable?"
+  },
+  {
+    "id": "medqa-005",
+    "question": "A 70-year-old on warfarin for atrial fibrillation needs dental extraction. How should anticoagulation be managed?"
+  },
+  {
+    "id": "medqa-006",
+    "question": "A patient with asthma uses a rescue inhaler daily and wakes at night with wheezing twice weekly. What step-up therapy is indicated?"
+  },
+  {
+    "id": "medqa-007",
+    "question": "A 45-year-old with sudden severe headache and neck stiffness is afebrile. What diagnosis must be excluded emergently?"
+  },
+  {
+    "id": "medqa-008",
+    "question": "An elderly patient on fluoxetine presents with agitation, hyperthermia, and clonus after starting tramadol. What is the concern?"
+  },
+  {
+    "id": "medqa-009",
+    "question": "A patient with community-acquired pneumonia is allergic to penicillin. What antibiotic regimen is commonly used?"
+  },
+  {
+    "id": "medqa-010",
+    "question": "A pregnant patient with hypothyroidism asks whether levothyroxine dose needs adjustment in the first trimester. What is the guidance?"
+  }
+]

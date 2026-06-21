@@ -56,7 +56,7 @@ export function ChatPanel({
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
         />
         <button className={`send ${streaming ? "running" : ""}`} disabled={streaming} onClick={submit}>
-          {streaming ? "Running…" : "Send ▸"}
+          {streaming ? "Running" : "Send"}
         </button>
       </div>
     </section>

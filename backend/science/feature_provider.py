@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 
 from .. import config
-from .sae import sae_topk
+from .sae import attribution_topk, sae_topk
 
 
 class FeatureProvider:
@@ -30,17 +30,22 @@ class FeatureProvider:
         activations=None,
         token_ids=None,
         special_ids=None,
+        grad=None,
+        baseline=None,
         k: int = config.TOPK,
         cap: int = config.TOPK_EVENT,
     ) -> list[dict]:
-        """Return up to `cap` deduped, activation-ranked {index, act, source} dicts.
+        """Return up to `cap` deduped, ranked candidate {index, act, source[, attr]} dicts.
         token_ids: per-position ids aligned to `activations`. special_ids: ids to skip.
+        grad: per-position dL/d(resid_post) aligned to `activations`, enabling attribution
+        ranking. baseline: optional [d_sae] neutral-prompt attribution to subtract (contrastive).
         Labels are attached downstream."""
         raise NotImplementedError
 
 
 class LocalSAEProvider(FeatureProvider):
-    """Uses the layer-12 activations already captured during local generation. Free + fast."""
+    """Uses the layer-17 resid_post activations captured during local generation. Free + fast.
+    Prefers attribution ranking (needs `grad`); falls back to raw-activation max-pool."""
 
     name = "local"
     reliable = True
@@ -51,6 +56,8 @@ class LocalSAEProvider(FeatureProvider):
         activations=None,
         token_ids=None,
         special_ids=None,
+        grad=None,
+        baseline=None,
         k: int = config.TOPK,
         cap: int = config.TOPK_EVENT,
     ) -> list[dict]:
@@ -59,10 +66,24 @@ class LocalSAEProvider(FeatureProvider):
                 "LocalSAEProvider needs captured activations [n_positions, d_in]"
             )
         special = set(special_ids or [])
+        keep = [
+            pos
+            for pos in range(activations.shape[0])
+            if not (token_ids is not None and pos < len(token_ids) and token_ids[pos] in special)
+        ]
+        # Preferred: attribution candidate pool (causal effect on the response), optionally
+        # contrastive (baseline subtracted). Replaces the raw-activation pool that structurally
+        # over-selects high-norm grammatical features. Drop the formulaic preamble positions so
+        # opening discourse features ("Okay,", greetings) don't dominate the attribution sum.
+        if grad is not None and config.RANK_METHOD == "attribution":
+            keep_c = [p for p in keep if p >= config.PREAMBLE_SKIP] or keep
+            try:
+                return attribution_topk(activations, grad, keep_c, cap=cap, baseline=baseline)
+            except Exception as e:  # noqa: BLE001 — degrade to activation ranking, never crash
+                print(f"[provider] attribution_topk failed ({e}); using activation ranking")
+        # Fallback: per-token top-k, max activation per feature across kept positions.
         best: dict[int, float] = {}
-        for pos in range(activations.shape[0]):
-            if token_ids is not None and pos < len(token_ids) and token_ids[pos] in special:
-                continue
+        for pos in keep:
             for f in sae_topk(activations[pos], k=k):
                 best[f["index"]] = max(best.get(f["index"], 0.0), f["act"])
         top = sorted(best.items(), key=lambda kv: -kv[1])[:cap]
@@ -84,6 +105,8 @@ class NeuronpediaProvider(FeatureProvider):
         activations=None,
         token_ids=None,
         special_ids=None,
+        grad=None,
+        baseline=None,
         k: int = config.TOPK,
         cap: int = config.TOPK_EVENT,
     ) -> list[dict]:
