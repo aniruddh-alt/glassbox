@@ -116,3 +116,37 @@ def generate_contrastive(spec: dict, *, generate_fn=None, max_new: int = 64) -> 
                 "intended_label": label,
             })
     return rows
+
+
+def judge_filter(spec: dict, rows: list[dict], *, client=None, judge_model: str | None = None) -> list[dict]:
+    """Score each response 1-5 for trait expression; keep rows whose behavior matched the
+    intended side (pos>=4 -> label 1, neg<=2 -> label 0). Drop the ambiguous middle."""
+    import json
+
+    from .. import config
+    from ..agent import prompts
+
+    if client is None:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    model = judge_model or config.JUDGE_MODEL
+
+    responses = [r["response"] for r in rows]
+    resp = client.messages.create(
+        model=model,
+        max_tokens=2000,
+        thinking={"type": "adaptive"},
+        output_config={"format": prompts.judge_schema(len(responses))},
+        messages=[{"role": "user", "content": prompts.judge_prompt(spec, responses)}],
+    )
+    text = next(b.text for b in resp.content if b.type == "text")
+    scores = json.loads(text)["scores"]
+
+    kept: list[dict] = []
+    for row, score in zip(rows, scores):
+        if row["intended_label"] == 1 and score >= 4:
+            kept.append({**row, "label": 1})
+        elif row["intended_label"] == 0 and score <= 2:
+            kept.append({**row, "label": 0})
+    return kept
