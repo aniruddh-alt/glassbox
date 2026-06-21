@@ -37,7 +37,7 @@ UI ──POST /api/chat──▶ [GPU] gemma-3-4b-it generate + layer-17 hook
 
 1. **Shape contract** — `backend/schema.py` (pydantic `CognitionEvent`) is the source of truth. `frontend/src/types.ts` and `fixtures/cognition_event.sample.json` mirror it. No lane changes the shape without 3-way agreement.
 2. **A↔C wire protocol** — `POST /api/chat` returns `application/x-ndjson`: zero-or-more `{"type":"token",...}` lines, then exactly one `{"type":"event", ...CognitionEvent}`. **Frontend builds fully against `fixtures/` before Backend streams real data.**
-3. **A↔B function contract** — Science exposes three torch-only functions Backend imports: `sae_topk(act, k=15)`, `score_all_trackers(act_last, act_resp)`, `synth_concept(name, desc)`. The **layer-12 activation tensor is the only object crossing the GPU→science boundary.** B never imports FastAPI; A never touches torch internals.
+3. **A↔B function contract** — Science exposes three torch-only functions Backend imports: `sae_topk(act, k=15)`, `score_all_trackers(act_last, act_resp)`, `synth_concept(name, desc)`. The **configured-layer activation tensor is the only object crossing the GPU→science boundary.** B never imports FastAPI; A never touches torch internals.
 4. **A↔sponsors seam** — `backend/fanout.py:fanout(event: dict)` is the single place every sponsor SDK lives. Adding/removing a sponsor = editing only `fanout.py`. Nothing on this path imports torch.
 
 ---
@@ -73,6 +73,22 @@ cd frontend && npm install && npm run dev   # Vite on :5173, proxies /api -> :80
 (or `"mode":"real"` with the full ml stack).
 
 `GLASSBOX_MODE=posthoc` (default) analyzes each completed turn; `GLASSBOX_MODE=live` streams per-token features. **Demo runs local** — do not stream through a RunPod/Cloudflare proxy.
+
+### GPU pod on eduroam (Tailscale)
+
+Campus WiFi often blocks RunPod public SSH. Use **Tailscale + SSH tunnel** instead:
+
+```bash
+# Mac terminal A
+./scripts/tunnel_pod.sh 100.98.245.123
+
+# Mac terminal B
+./scripts/run_with_pod.sh
+```
+
+Full restart guide, health checks, and pod-side commands: **`docs/tailscale-pod-runbook.md`**.
+
+Probe-vector training (Family B): **`docs/probe-training.md`**.
 
 ---
 

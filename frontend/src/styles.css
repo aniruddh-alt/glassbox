@@ -78,6 +78,24 @@ main{flex:1;display:grid;grid-template-columns:minmax(300px,36fr) 64fr;gap:14px;
   padding:10px 14px;border-radius:14px 14px 4px 14px;font-size:14px;line-height:1.5;color:var(--ink);
 }
 .msg.bot .body{font-size:14.5px;line-height:1.65;color:var(--read)}
+.msg.bot .body p{margin:0 0 10px}
+.msg.bot .body p:last-child{margin-bottom:0}
+.msg.bot .body h3,.msg.bot .body h4,.msg.bot .body h5{
+  margin:14px 0 6px;color:var(--ink);font-size:14.5px;font-weight:600;letter-spacing:0;
+}
+.msg.bot .body ul,.msg.bot .body ol{margin:8px 0 12px 18px;padding:0}
+.msg.bot .body li{margin:4px 0;padding-left:2px}
+.msg.bot .body strong{color:var(--ink);font-weight:600}
+.msg.bot .body em{color:var(--read)}
+.msg.bot .body code{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;
+  background:#eeeeeb;border:1px solid var(--line);border-radius:4px;padding:1px 4px;color:var(--ink);
+}
+.msg.bot .body pre{
+  margin:10px 0 12px;padding:10px 12px;overflow:auto;border-radius:var(--r-sm);
+  background:#202024;color:#f2f2ef;border:1px solid #303036;
+}
+.msg.bot .body pre code{background:transparent;border:0;color:inherit;padding:0}
 .cursor{display:inline-block;width:2px;height:15px;background:var(--ink);margin-left:2px;vertical-align:-2px;animation:caret 1s steps(1) infinite}
 @keyframes caret{50%{opacity:0}}
 
@@ -106,7 +124,24 @@ main{flex:1;display:grid;grid-template-columns:minmax(300px,36fr) 64fr;gap:14px;
 .ph .right.coral{color:var(--accent);font-variant-numeric:normal}
 
 /* ── feature field (clean scatter) ───────────────────────────────────── */
-.cloud{position:relative;height:420px;margin:var(--pad);border-radius:var(--r-sm);overflow:hidden;background:var(--screen);border:1px solid var(--line-2)}
+.cloud{
+  position:relative;height:420px;margin:var(--pad);border-radius:var(--r-sm);overflow:hidden;
+  background:
+    linear-gradient(135deg, rgba(245,247,242,.96) 0%, rgba(237,242,238,.9) 42%, rgba(244,240,235,.92) 100%),
+    radial-gradient(circle at 22% 20%, rgba(71,128,111,.14), transparent 34%),
+    radial-gradient(circle at 82% 72%, rgba(197,80,64,.1), transparent 32%),
+    var(--screen);
+  border:1px solid var(--line-2);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.78), inset 0 -26px 70px rgba(24,24,27,.035);
+}
+.cloud::before{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:
+    linear-gradient(rgba(24,24,27,.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(24,24,27,.026) 1px, transparent 1px);
+  background-size:42px 42px;
+  mask-image:linear-gradient(to bottom, rgba(0,0,0,.55), rgba(0,0,0,.08));
+}
 .cloud canvas{display:block;width:100%;height:100%}
 .ctip{
   position:absolute;pointer-events:none;opacity:0;transition:opacity .1s;z-index:5;

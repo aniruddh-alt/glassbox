@@ -31,3 +31,25 @@ def test_uncertainty_tracker_populates_meter():
     assert ev.uncertainty_proj == 1.27
     assert ev.flag is True
     assert ev.severity == "warning"
+
+
+def test_any_flagged_tracker_promotes_event_severity():
+    trackers = {
+        "risk_awareness": {
+            "score": 0.24,
+            "proj": -1.15,
+            "flag": True,
+            "reliable": True,
+            "alert_direction": "low",
+            "status": "ready",
+            "user_defined": False,
+        }
+    }
+    ev = build_cognition_event(
+        message_id="m3", ts=1.0, user_msg="q", response="a",
+        trackers=trackers, features=[], model="m", layer=17,
+    )
+    assert ev.uncertainty is None
+    assert ev.flag is True
+    assert ev.severity == "warning"
+    assert ev.trackers["risk_awareness"].alert_direction == "low"

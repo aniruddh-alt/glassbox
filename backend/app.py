@@ -72,13 +72,25 @@ async def analyze(body: dict):
 
 @app.post("/api/track")
 async def track(body: dict):
-    """User-defined concept (WIP — synth_concept unimplemented). Returns a stub status."""
-    return {"tracker_id": body.get("concept", "concept"), "status": "computing"}
+    """Generate a natural-language probe artifact and register it if a direction is supplied."""
+    from .science import concept_synth
+
+    concept = body.get("concept") or body.get("name") or "concept"
+    description = body.get("description") or body.get("prompt")
+    direction = body.get("direction")
+    return await run_in_threadpool(
+        concept_synth.synth_concept,
+        concept,
+        description,
+        direction=direction,
+    )
 
 
 @app.get("/api/track/{tracker_id}")
 async def track_status(tracker_id: str):
-    return {"status": "ready", "auroc": None}
+    from .science import concept_synth
+
+    return await run_in_threadpool(concept_synth.tracker_status, tracker_id)
 
 
 @app.get("/api/feature/{index}")

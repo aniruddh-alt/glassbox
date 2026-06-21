@@ -57,12 +57,15 @@ def _run_recon_check() -> None:
 def _attempt_load() -> None:
     try:
         from . import engine
-        from .science import sae
+        from .science import persona, sae
 
         engine.load_engine()
         STATE["model_loaded"] = True
         sae.load_sae()
         STATE["sae_loaded"] = True
+        loaded = persona.load_artifacts()
+        if loaded:
+            print(f"[gpu_service] loaded probe trackers: {', '.join(loaded)}")
         STATE["mode"] = "real"
         _run_recon_check()
     except Exception as e:  # noqa: BLE001

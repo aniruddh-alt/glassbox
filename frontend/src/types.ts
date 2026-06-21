@@ -3,6 +3,7 @@
 export const SCHEMA_VERSION = "1.0";
 
 export type Severity = "info" | "warning";
+export type AlertDirection = "high" | "low";
 
 export interface IO {
   user_msg: string;
@@ -15,6 +16,7 @@ export interface Tracker {
   flag: boolean;        // score >= calibrated threshold
   reliable: boolean;    // Family B = true; never set for SAE labels
   proj_pre?: number | null;
+  alert_direction?: AlertDirection;
   user_defined?: boolean;
   status?: "computing" | "ready";
 }
@@ -24,7 +26,7 @@ export interface Feature {
   label: string;
   act: number;
   source: string;       // "12-gemmascope-res-16k"
-  caveat: string;       // "auto-interp label, may be unreliable"
+  caveat: string;       // short provenance note (kept in the contract; not surfaced in the UI)
   tracked: string | null;
 }
 

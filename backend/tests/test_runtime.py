@@ -86,6 +86,7 @@ def test_health_payload_shape():
 def test_start_loading_eager_polls_pod(monkeypatch):
     monkeypatch.setenv("GLASSBOX_EAGER_LOAD", "1")
     monkeypatch.setattr(runtime.config, "POD_URL", "http://pod.test")
+    monkeypatch.setattr(runtime, "_ensure_poll_loop", lambda: None, raising=False)
     import backend.pod_client as pc
 
     monkeypatch.setattr(
@@ -95,3 +96,35 @@ def test_start_loading_eager_polls_pod(monkeypatch):
     )
     runtime.start_loading()
     assert runtime.STATE["mode"] == "real"
+
+
+def test_eager_load_also_keeps_polling(monkeypatch):
+    """Regression: eager load must do the synchronous first poll AND keep a background
+    poll running, so a pod that blips offline then recovers self-heals back to mode=real
+    instead of being trapped in fallback until the backend is restarted."""
+    monkeypatch.setenv("GLASSBOX_EAGER_LOAD", "1")
+    monkeypatch.setattr(runtime.config, "POD_URL", "http://pod.test")
+    import backend.pod_client as pc
+
+    monkeypatch.setattr(
+        pc, "health", lambda: {"mode": "real", "model_loaded": True, "sae_loaded": True}
+    )
+    started: list[bool] = []
+    monkeypatch.setattr(runtime, "_ensure_poll_loop", lambda: started.append(True), raising=False)
+
+    runtime.start_loading()
+
+    assert runtime.STATE["mode"] == "real"  # eager still blocks on the first poll
+    assert started == [True]  # ...and ongoing polling is started (the fix)
+
+
+def test_non_eager_starts_poll_loop(monkeypatch):
+    """Non-eager startup must also start the background poll loop."""
+    monkeypatch.delenv("GLASSBOX_EAGER_LOAD", raising=False)
+    monkeypatch.setattr(runtime.config, "POD_URL", "http://pod.test")
+    started: list[bool] = []
+    monkeypatch.setattr(runtime, "_ensure_poll_loop", lambda: started.append(True), raising=False)
+
+    runtime.start_loading()
+
+    assert started == [True]

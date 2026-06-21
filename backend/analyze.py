@@ -25,9 +25,10 @@ _SYNTACTIC_MARKERS = (
     "punctuation", "capitaliz", "syntactic", "grammar", "forms of", "the word ", "word pairs",
     "phrase", "it's ", "this/that", "this isn't", "for purposes", "general purpose",
     "sequence progression", "subsequent word", "subsequent action", "it depends",
+    "okay", "greeting", "acknowledgment", "transition to task",
     # formatting / structural markers (also catch auto-interp labels for unlabelled features)
     "newline", "line break", "paragraph", "whitespace", "formatting", "markdown",
-    "bullet", "list marker", "list item", "section break", "heading", "discourse",
+    "bullet", "list", "code snippet", "section break", "heading", "discourse",
     "token fragment", "word fragment", "subword", "morpholog", "plural", "start of",
     "end of sentence", "sentence boundary", "function word",
 )
@@ -68,6 +69,9 @@ def _rank_features(candidates: list[dict]) -> list[dict]:
             "tracked": None,
         }
 
+    def _unlabeled(feat: dict) -> bool:
+        return feat["label"] == f"feature {feat['index']}"
+
     # Attribution path: candidates carry `attr` = causal effect on the response (act × grad·decoder).
     # Attach labels (auto-interp fills Neuronpedia's gaps) and DEMOTE structural features — punctuation,
     # formatting, discourse glue, token fragments — by STRUCTURAL_PENALTY so genuine concept/medical
@@ -81,6 +85,11 @@ def _rank_features(candidates: list[dict]) -> list[dict]:
             penalty = config.STRUCTURAL_PENALTY if structural else 1.0
             scored.append((f.get("attr", 0.0) * penalty, _feature(f, s["label"])))
         scored.sort(key=lambda t: -t[0])
+        if config.DROP_UNLABELED:
+            semantic = [t for t in scored if not _unlabeled(t[1]) and not _is_syntactic(t[1]["label"])]
+            structural = [t for t in scored if not _unlabeled(t[1]) and _is_syntactic(t[1]["label"])]
+            if semantic:
+                scored = semantic + structural + [t for t in scored if _unlabeled(t[1])]
         return [feat for _, feat in scored[: config.TOPK_EVENT]]
 
     scored: list[tuple[float, dict]] = []

@@ -98,11 +98,14 @@ def get_feature_stats(index: int, timeout: float = 6.0) -> dict:
         "density": float(density) if density is not None else None,
         "is_structural": bool(is_structural),
     }
+    if not resolved:
+        return stats
+
     _stats[index] = stats
-    if resolved:  # persist only real labels — a transient failure ("feature N") can retry next run
-        with _lock:
-            disk[str(index)] = stats
-            _save_disk()
+    # Persist only real labels — a transient failure ("feature N") can retry next call.
+    with _lock:
+        disk[str(index)] = stats
+        _save_disk()
     return stats
 
 

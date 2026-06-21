@@ -97,3 +97,27 @@ def test_get_feature_stats_fallback_not_persisted(monkeypatch, tmp_path):
     assert s["label"] == "feature 999"
     assert s["is_structural"] is False
     assert "999" not in labels._disk  # transient failure must be retryable next run
+
+
+def test_get_feature_stats_retries_unresolved_session_fallback(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    calls = {"n": 0}
+
+    def flaky_get(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("temporary network failure")
+        return _fake_resp(
+            {
+                "explanations": [{"description": "pregnancy and childbirth"}],
+                "maxActApprox": 700.0,
+                "frac_nonzero": 0.001,
+                "activations": [],
+            }
+        )
+
+    monkeypatch.setattr(httpx, "get", flaky_get)
+
+    assert labels.get_feature_stats(999)["label"] == "feature 999"
+    assert labels.get_feature_stats(999)["label"] == "pregnancy and childbirth"
+    assert calls["n"] == 2

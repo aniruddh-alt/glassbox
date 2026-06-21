@@ -65,6 +65,8 @@ def test_is_syntactic_classifier():
     assert analyze._is_syntactic("it's followed by verb or adjective")
     assert analyze._is_syntactic("adverbs modifying subsequent words")
     assert analyze._is_syntactic("contextual prepositions")
+    assert analyze._is_syntactic("Okay,")
+    assert analyze._is_syntactic("numbered lists and code snippets")
     assert not analyze._is_syntactic("pregnancy and pregnant status")
     assert not analyze._is_syntactic("heart and cardiac events")
 

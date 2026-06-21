@@ -35,10 +35,11 @@ export const DEMO_EVENT: CognitionEvent = {
   flag: true,
   severity: "warning",
   trackers: {
-    uncertainty: { score: 0.83, proj: 1.27, flag: true, reliable: true, proj_pre: 0.91, user_defined: false, status: "ready" },
-    hallucination: { score: 0.71, proj: 0.9, flag: true, reliable: true, user_defined: false, status: "ready" },
-    harmful: { score: 0.09, proj: -0.4, flag: false, reliable: true, user_defined: false, status: "ready" },
-    sycophancy: { score: 0.38, proj: 0.2, flag: false, reliable: true, user_defined: false, status: "ready" },
+    uncertainty: { score: 0.83, proj: 1.27, flag: true, reliable: true, proj_pre: 0.91, alert_direction: "high", user_defined: false, status: "ready" },
+    hallucination: { score: 0.71, proj: 0.9, flag: true, reliable: true, alert_direction: "high", user_defined: false, status: "ready" },
+    harmful: { score: 0.09, proj: -0.4, flag: false, reliable: true, alert_direction: "high", user_defined: false, status: "ready" },
+    risk_awareness: { score: 0.22, proj: -1.1, flag: true, reliable: true, alert_direction: "low", user_defined: false, status: "ready" },
+    sycophancy: { score: 0.38, proj: 0.2, flag: false, reliable: true, alert_direction: "high", user_defined: false, status: "ready" },
   },
   features: [
     f(4412, "pregnancy & gestation", 6.2),
@@ -71,6 +72,7 @@ export const PROBE_META: Record<string, { auroc: number; thr: number }> = {
   uncertainty: { auroc: 0.94, thr: 0.55 },
   hallucination: { auroc: 0.89, thr: 0.5 },
   harmful: { auroc: 0.92, thr: 0.6 },
+  risk_awareness: { auroc: 0.88, thr: 0.35 },
   sycophancy: { auroc: 0.81, thr: 0.6 },
 };
 

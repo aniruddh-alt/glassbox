@@ -23,17 +23,20 @@ def build_cognition_event(
     """trackers: dict[str -> {score,proj,flag,...}] from persona.score_all_trackers ({} until
     probes exist). features: list[Feature-like dicts] with labels already attached.
 
-    Family B is WIP: with no "uncertainty" tracker, the meter fields stay null and flag is False.
+    Family B is WIP: with no "uncertainty" tracker, the meter fields stay null. The event-level
+    flag is raised by any tracker whose own monitor flag is true.
     """
     unc = trackers.get("uncertainty")
     if unc is None:
         uncertainty = uncertainty_proj = uncertainty_proj_pre = None
-        flag = False
     else:
         uncertainty = unc.get("score")
         uncertainty_proj = unc.get("proj")
         uncertainty_proj_pre = unc.get("proj_pre")
-        flag = bool(unc.get("flag", (uncertainty or 0.0) >= DEFAULT_THRESHOLD))
+    flag = any(
+        bool(t.get("flag", (t.get("score") or 0.0) >= DEFAULT_THRESHOLD))
+        for t in trackers.values()
+    )
     return CognitionEvent(
         message_id=message_id,
         ts=ts,
