@@ -40,6 +40,23 @@ def test_fanout_isolates_failing_sink(monkeypatch):
     assert calls == ["good"]
 
 
+def test_store_sink_records_redacted(monkeypatch):
+    import backend.fanout as fo
+    from backend import observability
+    store = observability.ObservabilityStore()
+    monkeypatch.setattr(observability, "STORE", store)
+    fo.StoreSink().emit({"message_id": "m", "ts": 1.0, "io": {"user_msg": "SECRET"},
+                         "features": [], "trackers": {}}, {"turn_ms": 5})
+    assert store.snapshot()["totals"]["turns"] == 1
+    assert "SECRET" not in repr(store.snapshot())
+
+
+def test_phoenix_not_registered_when_remote(monkeypatch):
+    import backend.fanout as fo
+    monkeypatch.setattr(fo.config, "PHOENIX_ENDPOINT", "https://cloud.phoenix.example.com")
+    assert fo._phoenix_is_local() is False
+
+
 def test_phoenix_sink_redacts_and_builds_waterfall(monkeypatch):
     import backend.fanout as fo
     spans = []
