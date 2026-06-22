@@ -39,6 +39,7 @@ def test_capture_cognition_alarm_requires_flag(monkeypatch):
             "trackers": {"over_confidence": {"score": 0.9, "flag": True}},
             "features": [{"label": "dosing"}],
         },
+        None,
         flush=True,
     ) is True
     assert captured["msg"].startswith("Confident-wrong medical answer")
@@ -67,7 +68,7 @@ def test_replay_sentry_endpoint(monkeypatch):
     monkeypatch.setattr("backend.app.sentry_enabled", lambda: True)
     captured = {}
 
-    def _capture(ev, flush=False):
+    def _capture(ev, obs=None, *, flush=False):
         captured["reason"] = __import__("backend.fanout", fromlist=["_flag_reason"])._flag_reason(ev)
         return True
 
@@ -88,7 +89,7 @@ def test_test_sentry_endpoint(monkeypatch):
     assert r.status_code == 503
 
     monkeypatch.setattr("backend.app.sentry_enabled", lambda: True)
-    monkeypatch.setattr("backend.app.capture_cognition_alarm", lambda ev, flush=False: True)
+    monkeypatch.setattr("backend.app.capture_cognition_alarm", lambda ev, obs=None, *, flush=False: True)
     r = TestClient(app).post("/api/observability/test-sentry")
     assert r.status_code == 200
     assert r.json()["ok"] is True

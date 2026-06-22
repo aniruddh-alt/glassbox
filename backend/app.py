@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     still serves.
     """
     runtime.start_loading(_cfg)
-    init_sponsors()
+    init_sponsors(_cfg.observability, _cfg.sentry_dsn)
     yield
 
 
@@ -105,7 +105,7 @@ async def observability_test_sentry():
         "features": [{"index": 0, "label": "synthetic test alarm (no PHI)", "act": 1.0}],
         "io": {"user_msg": "[synthetic test — not a real patient]", "response": "[synthetic test]"},
     }
-    sent = capture_cognition_alarm(event, flush=True)
+    sent = capture_cognition_alarm(event, _cfg.observability, flush=True)
     return {
         "ok": sent,
         "message_id": message_id,
@@ -127,7 +127,7 @@ async def observability_replay_sentry(body: dict | None = None):
         view = observability.STORE.get_turn(flagged[-1]["message_id"]) if flagged else None
     if view is None or not view.get("flag"):
         return JSONResponse({"ok": False, "reason": "turn not found or not flagged"}, status_code=404)
-    sent = capture_cognition_alarm({**view, "io": {}}, flush=True)
+    sent = capture_cognition_alarm({**view, "io": {}}, _cfg.observability, flush=True)
     return {"ok": sent, "message_id": view["message_id"], "flag_reason": _flag_reason(view)}
 
 
@@ -148,7 +148,7 @@ async def chat(body: dict):
         perf["t0_ns"] = turn_start_ns
         payload = event.model_dump()
         try:
-            fanout(payload, perf)
+            fanout(payload, perf, obs=_cfg.observability, probes=_cfg.probes)
         except Exception as e:
             print(f"[app] fanout failed: {e}")
         for chunk in _chunks(answer):
@@ -170,7 +170,7 @@ async def analyze(body: dict):
     perf["t0_ns"] = turn_start_ns
     payload = event.model_dump()
     try:
-        fanout(payload, perf)
+        fanout(payload, perf, obs=_cfg.observability, probes=_cfg.probes)
     except Exception as e:
         print(f"[app] fanout failed: {e}")
     return JSONResponse(payload)

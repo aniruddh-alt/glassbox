@@ -23,7 +23,9 @@ try:
 except Exception:
     pass  # rely on exported env vars instead
 
-from . import fanout
+from . import config, fanout
+
+_cfg = config.load_config()  # Transitional cfg — Task 13 threads cfg through call chain.
 
 _FIX = json.loads(
     (
@@ -33,7 +35,7 @@ _FIX = json.loads(
 
 
 def main() -> None:
-    fanout.init_sponsors()
+    fanout.init_sponsors(_cfg.observability, _cfg.sentry_dsn)
 
     flagged = _FIX  # the sample is already a confident-wrong event
     clean = {
@@ -46,10 +48,10 @@ def main() -> None:
     }
 
     for ev in (flagged, clean):
-        fanout.fanout(ev)
+        fanout.fanout(ev, obs=_cfg.observability, probes=_cfg.probes)
         print(f"emitted: flag={ev['flag']} uncertainty={ev['uncertainty']}")
 
-    if fanout.sentry_enabled():
+    if fanout.sentry_enabled(_cfg.sentry_dsn):
         import sentry_sdk
         sentry_sdk.flush(timeout=3)
 
