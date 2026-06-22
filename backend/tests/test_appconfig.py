@@ -58,3 +58,21 @@ def test_secrets_read_from_env_only(monkeypatch):
     s = Secrets()
     assert s.anthropic_api_key == "sk-test-123"
     assert s.pod_token == "pod-secret"
+
+
+def test_appconfig_assembles_and_derives_ids():
+    from backend.config import AppConfig
+
+    cfg = AppConfig()
+    assert cfg.model.layer == 17
+    assert cfg.sae.release == "gemma-scope-2-4b-it-res"
+    assert cfg.feature_cloud.topk == 15
+    assert cfg.runtime.product_name == "GlassBox"
+    # secret scalars default to empty (never auto-populated by the model itself)
+    assert cfg.anthropic_api_key == ""
+    assert cfg.pod_token == ""
+    # derived helpers substitute the layer
+    assert cfg.sae_id() == "layer_17_width_16k_l0_medium"
+    assert cfg.sae_id(22) == "layer_22_width_16k_l0_medium"
+    assert cfg.np_source() == "17-gemmascope-2-res-16k"
+    assert cfg.np_source(9) == "9-gemmascope-2-res-16k"

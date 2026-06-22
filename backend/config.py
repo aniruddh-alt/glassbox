@@ -142,6 +142,54 @@ class Secrets(BaseSettings):
     hf_token: str = Field(default="", alias="HF_TOKEN")
 
 
+class AppConfig(BaseModel):
+    """Single source of truth. Built once at startup, stored on app.state, threaded down."""
+
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    sae: SAEConfig = Field(default_factory=SAEConfig)
+    feature_cloud: FeatureCloudConfig = Field(default_factory=FeatureCloudConfig)
+    probes: ProbeConfig = Field(default_factory=ProbeConfig)
+    observability: ObsConfig = Field(default_factory=ObsConfig)
+    pod: PodConfig = Field(default_factory=PodConfig)
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+
+    # Secrets injected by the loader (env-only). NOT loaded from YAML.
+    anthropic_api_key: str = ""
+    sentry_dsn: str = ""
+    sentry_auth_token: str = ""
+    pod_token: str = ""
+    hf_token: str = ""
+
+    def sae_id(self, layer: int | None = None) -> str:
+        """SAELens sae_id for `layer` (defaults to model.layer)."""
+        return self.sae.sae_id_pattern.format(
+            layer=layer if layer is not None else self.model.layer
+        )
+
+    def np_source(self, layer: int | None = None) -> str:
+        """Neuronpedia source slug for `layer`."""
+        return self.sae.np_source_pattern.format(
+            layer=layer if layer is not None else self.model.layer
+        )
+
+    def resolve_device(self, pref: str | None = None) -> str:
+        """Resolve the runtime device. torch imported lazily so CPU modules can call build()."""
+        import torch
+
+        p = (pref or self.model.device or "auto").lower()
+        if p == "cuda" and torch.cuda.is_available():
+            return "cuda"
+        if p == "mps" and torch.backends.mps.is_available():
+            return "mps"
+        if p == "cpu":
+            return "cpu"
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+
+
 # --------------------------------------------------------------------------- #
 # LEGACY flat globals — retained for backward compatibility during WS0 migration.
 # Tasks 5–14 replace every consumer with the new sub-model paths; globals are
