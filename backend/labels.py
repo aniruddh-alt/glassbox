@@ -14,7 +14,9 @@ import json
 import os
 import threading
 
-from . import config
+import httpx
+
+from .config import SAEConfig, FeatureCloudConfig
 
 _stats: dict[int, dict] = {}  # session cache (includes unresolved "feature N" fallbacks)
 _disk: dict | None = None  # persistent cache of resolved labels (labelled features only)
@@ -52,7 +54,15 @@ def _save_disk() -> None:
         pass
 
 
-def get_feature_stats(index: int, timeout: float = 6.0) -> dict:
+def get_feature_stats(
+    index: int,
+    sae: SAEConfig,
+    feature_cloud: FeatureCloudConfig,
+    anthropic_api_key: str,
+    *,
+    np_source: str,
+    timeout: float = 6.0,
+) -> dict:
     """Return {label, max_act, density, is_structural} for an SAE feature index (cached).
 
     Resolution order: in-memory cache -> disk cache -> Neuronpedia explanation -> Claude auto-interp
@@ -64,10 +74,8 @@ def get_feature_stats(index: int, timeout: float = 6.0) -> dict:
         _stats[index] = disk[str(index)]
         return _stats[index]
 
-    import httpx
-
-    url = config.NP_FEATURE_URL.format(
-        model=config.NP_MODEL, source=config.NP_SOURCE, index=index
+    url = sae.np_feature_url.format(
+        model=sae.np_model, source=np_source, index=index
     )
     label = max_act = density = None
     activations = None
@@ -89,8 +97,8 @@ def get_feature_stats(index: int, timeout: float = 6.0) -> dict:
     is_structural = False
     resolved = label is not None
     # No Neuronpedia explanation -> label it ourselves from the activating examples.
-    if label is None and config.AUTOINTERP and activations:
-        got = _autointerp(activations)
+    if label is None and feature_cloud.autointerp and activations:
+        got = _autointerp(activations, feature_cloud, anthropic_api_key)
         if got:
             label, is_structural, resolved = got["label"], got["is_structural"], True
 
@@ -114,7 +122,7 @@ def get_feature_stats(index: int, timeout: float = 6.0) -> dict:
 # ---- Claude auto-interp --------------------------------------------------------
 _SYSTEM = (
     "You are a mechanistic-interpretability researcher labelling a single sparse-autoencoder "
-    "feature of a medical chatbot (Gemma-3-4b-it, layer 17). You are shown text excerpts where "
+    "feature of a general-purpose language model. You are shown text excerpts where "
     "the feature fired most strongly; the single peak-activating token in each excerpt is wrapped "
     "in <<double angle brackets>>. Find the pattern COMMON ACROSS ALL excerpts and describe the "
     "CONTEXT/ROLE the feature responds to — NOT merely the literal bracketed token. A feature "
@@ -161,16 +169,22 @@ def _highlighted_windows(activations, n: int, radius: int) -> list[str]:
     return out
 
 
-def _autointerp(activations) -> dict | None:
+def _anthropic_client(key: str):
+    """Create an Anthropic client. Module-level helper so tests can monkeypatch a single seam."""
+    import anthropic
+    return anthropic.Anthropic(api_key=key, timeout=_CLAUDE_TIMEOUT, max_retries=2)
+
+
+def _autointerp(
+    activations,
+    feature_cloud: FeatureCloudConfig,
+    anthropic_api_key: str,
+) -> dict | None:
     """Label a feature from its activating examples via Claude Haiku. None on any failure."""
-    if not config.ANTHROPIC_API_KEY:
+    if not anthropic_api_key:
         return None
     windows = _highlighted_windows(activations, _N_EXAMPLES, _WINDOW_RADIUS)
     if not windows:
-        return None
-    try:
-        import anthropic
-    except Exception:
         return None
     examples = "\n".join(f"{i + 1}. {w}" for i, w in enumerate(windows))
     user = (
@@ -178,11 +192,9 @@ def _autointerp(activations) -> dict | None:
         "Call record_feature_label with the shared concept across ALL excerpts."
     )
     try:
-        client = anthropic.Anthropic(
-            api_key=config.ANTHROPIC_API_KEY, timeout=_CLAUDE_TIMEOUT, max_retries=2
-        )
+        client = _anthropic_client(anthropic_api_key)
         resp = client.messages.create(
-            model=config.AUTOINTERP_MODEL,
+            model=feature_cloud.autointerp_model,
             max_tokens=200,
             system=_SYSTEM,
             tools=[_TOOL],
@@ -201,21 +213,43 @@ def _autointerp(activations) -> dict | None:
     return None
 
 
-def get_label(index: int, timeout: float = 6.0) -> str:
+def get_label(
+    index: int,
+    sae: SAEConfig,
+    feature_cloud: FeatureCloudConfig,
+    anthropic_api_key: str,
+    *,
+    np_source: str,
+    timeout: float = 6.0,
+) -> str:
     """Auto-interp/Neuronpedia description for an SAE feature index (cached)."""
-    return get_feature_stats(index, timeout)["label"]
+    return get_feature_stats(index, sae, feature_cloud, anthropic_api_key, np_source=np_source, timeout=timeout)["label"]
 
 
-def get_labels(indices) -> dict[int, str]:
+def get_labels(
+    indices,
+    sae: SAEConfig,
+    feature_cloud: FeatureCloudConfig,
+    anthropic_api_key: str,
+    *,
+    np_source: str,
+) -> dict[int, str]:
     """Fetch+cache a batch of labels. Use offline to pre-warm before a demo."""
-    return {i: get_label(i) for i in indices}
+    return {i: get_label(i, sae, feature_cloud, anthropic_api_key, np_source=np_source) for i in indices}
 
 
-def prewarm(indices) -> None:
+def prewarm(
+    indices,
+    sae: SAEConfig,
+    feature_cloud: FeatureCloudConfig,
+    anthropic_api_key: str,
+    *,
+    np_source: str,
+) -> None:
     """Resolve + cache labels for the given feature indices offline, so the live demo path never
     makes a synchronous Claude call. Run over the expected top-candidate indices before a demo."""
     for i in indices:
-        get_feature_stats(i)
+        get_feature_stats(i, sae, feature_cloud, anthropic_api_key, np_source=np_source)
 
 
 def preload_from_s3() -> None:
