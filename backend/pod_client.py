@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-from . import config
-
 _UA = {"User-Agent": "glassbox-orchestration/0.1"}
 
 
 class PodError(Exception):
-    """Raised when the pod is unreachable or returns a non-2xx response.
-
-    `detail` may carry safe setup errors (e.g. missing API key) for whitelisted endpoints.
-    Never embed /turn response bodies — they may contain model output.
-    """
+    """Raised when the pod is unreachable or returns a non-2xx response."""
 
     def __init__(self, status: int, stage: str, *, detail: str = "") -> None:
         self.status = status
@@ -42,49 +36,48 @@ def pod_unavailable_payload(exc: Exception) -> dict:
     return {"status": "unavailable", "detail": msg}
 
 
-def _headers() -> dict[str, str]:
+def _headers(pod_token: str) -> dict[str, str]:
     h = dict(_UA)
-    if config.POD_TOKEN:
-        h["Authorization"] = f"Bearer {config.POD_TOKEN}"
+    if pod_token:
+        h["Authorization"] = f"Bearer {pod_token}"
     return h
 
 
-def _base_url() -> str:
-    if not config.POD_URL:
-        raise ConnectionError("POD_URL is not configured")
-    return config.POD_URL
+def _base_url(pod) -> str:
+    if not pod.url:
+        raise ConnectionError("pod.url is not configured")
+    return pod.url
 
 
-def _post(path: str, payload: dict, stage: str = "request") -> dict:
+def _post(path: str, payload: dict, pod, pod_token: str, stage: str = "request") -> dict:
     import httpx
 
     try:
         r = httpx.post(
-            f"{_base_url()}{path}",
+            f"{_base_url(pod)}{path}",
             json=payload,
-            headers=_headers(),
-            timeout=config.POD_TIMEOUT,
+            headers=_headers(pod_token),
+            timeout=pod.timeout,
         )
     except httpx.HTTPError as e:
         raise PodError(0, stage) from e
     if r.status_code != 200:
-        # LOCAL log only — the body may echo the model answer; never embed in the exception.
         print(f"[pod] {stage} HTTP {r.status_code}: {r.text[:200]}")
         raise PodError(r.status_code, stage)
     return r.json()
 
 
-def health() -> dict | None:
-    """Poll pod /health. Returns None when POD_URL is unset; raises PodError on failure."""
-    if not config.POD_URL:
+def health(pod, pod_token: str) -> dict | None:
+    """Poll pod /health. Returns None when pod.url is unset; raises PodError on failure."""
+    if not pod.url:
         return None
     import httpx
 
     try:
         r = httpx.get(
-            f"{_base_url()}/health",
-            headers=_headers(),
-            timeout=min(config.POD_TIMEOUT, 10.0),
+            f"{_base_url(pod)}/health",
+            headers=_headers(pod_token),
+            timeout=min(pod.timeout, 10.0),
         )
     except httpx.HTTPError as e:
         raise PodError(0, "health") from e
@@ -93,77 +86,60 @@ def health() -> dict | None:
     return r.json()
 
 
-def inference(messages: list[dict], *, max_new: int | None = None) -> dict:
+def inference(messages: list[dict], pod, pod_token: str, *, max_new: int) -> dict:
     """POST /inference → {answer}."""
-    return _post(
-        "/inference",
-        {"messages": messages, "max_new": max_new or config.MAX_NEW_TOKENS},
-        stage="inference",
-    )
+    return _post("/inference", {"messages": messages, "max_new": max_new}, pod, pod_token, stage="inference")
 
 
-def activations(
-    messages: list[dict],
-    *,
-    max_new: int | None = None,
-    attribution: bool = False,
-) -> dict:
+def activations(messages: list[dict], pod, pod_token: str, *, max_new: int, attribution: bool = False) -> dict:
     """POST /activations → {answer, resp_start, act_last, act_resp}."""
     return _post(
         "/activations",
-        {
-            "messages": messages,
-            "max_new": max_new or config.MAX_NEW_TOKENS,
-            "attribution": attribution,
-        },
+        {"messages": messages, "max_new": max_new, "attribution": attribution},
+        pod,
+        pod_token,
         stage="activations",
     )
 
 
 def sae_features(
     messages: list[dict],
+    pod,
+    pod_token: str,
     *,
-    max_new: int | None = None,
+    max_new: int,
     attribution: bool | None = None,
     cap: int | None = None,
 ) -> dict:
     """POST /sae/features → {answer, candidates, reliable}."""
-    body: dict = {
-        "messages": messages,
-        "max_new": max_new or config.MAX_NEW_TOKENS,
-    }
+    body: dict = {"messages": messages, "max_new": max_new}
     if attribution is not None:
         body["attribution"] = attribution
     if cap is not None:
         body["cap"] = cap
-    return _post("/sae/features", body, stage="sae_features")
+    return _post("/sae/features", body, pod, pod_token, stage="sae_features")
 
 
-def turn(messages: list[dict], *, max_new: int | None = None) -> dict:
+def turn(messages: list[dict], pod, pod_token: str, *, max_new: int) -> dict:
     """POST /turn → {answer, candidates, trackers, reliable}."""
-    return _post(
-        "/turn",
-        {"messages": messages, "max_new": max_new or config.MAX_NEW_TOKENS},
-        stage="turn",
-    )
+    return _post("/turn", {"messages": messages, "max_new": max_new}, pod, pod_token, stage="turn")
 
 
-def track(request: str) -> dict:
+def track(request: str, pod, pod_token: str) -> dict:
     """POST /api/track → {tracker_id, status}. Body carries only the NL request (no PHI)."""
     import httpx
 
     try:
         r = httpx.post(
-            f"{_base_url()}/api/track",
+            f"{_base_url(pod)}/api/track",
             json={"request": request},
-            headers=_headers(),
-            timeout=config.POD_TIMEOUT,
+            headers=_headers(pod_token),
+            timeout=pod.timeout,
         )
     except httpx.HTTPError as e:
         raise PodError(0, "track") from e
     if r.status_code == 200:
         return r.json()
-    # Safe to surface pod setup errors (no model I/O in these bodies).
     detail = ""
     try:
         detail = str(r.json().get("detail") or "")
@@ -175,21 +151,20 @@ def track(request: str) -> dict:
     raise PodError(r.status_code, "track")
 
 
-def clear_custom_trackers() -> dict:
+def clear_custom_trackers(pod, pod_token: str) -> dict:
     """POST /api/trackers/clear-custom → {removed, trackers}."""
-    return _post("/api/trackers/clear-custom", {}, stage="clear_custom_trackers")
+    return _post("/api/trackers/clear-custom", {}, pod, pod_token, stage="clear_custom_trackers")
 
 
-def track_status(tracker_id: str) -> dict:
-    """GET /api/track/{id} → the probe-job record. A 404 from the pod maps to {"status": "unknown"}
-    rather than an error, so a stale/forgotten tracker_id is reported, not raised."""
+def track_status(tracker_id: str, pod, pod_token: str) -> dict:
+    """GET /api/track/{id} → the probe-job record."""
     import httpx
 
     try:
         r = httpx.get(
-            f"{_base_url()}/api/track/{tracker_id}",
-            headers=_headers(),
-            timeout=min(config.POD_TIMEOUT, 15.0),
+            f"{_base_url(pod)}/api/track/{tracker_id}",
+            headers=_headers(pod_token),
+            timeout=min(pod.timeout, 15.0),
         )
     except httpx.HTTPError as e:
         raise PodError(0, "track_status") from e

@@ -183,7 +183,7 @@ async def track(body: dict):
 
     request = body.get("request") or body.get("concept") or body.get("name") or ""
     try:
-        return await run_in_threadpool(pod_client.track, request)
+        return await run_in_threadpool(pod_client.track, request, _cfg.pod, _cfg.pod_token)
     except Exception as e:  # noqa: BLE001
         print(f"[app] track proxy failed: {e}")
         return JSONResponse(pod_client.pod_unavailable_payload(e), status_code=503)
@@ -195,7 +195,7 @@ async def clear_custom_trackers():
     from . import pod_client
 
     try:
-        return await run_in_threadpool(pod_client.clear_custom_trackers)
+        return await run_in_threadpool(pod_client.clear_custom_trackers, _cfg.pod, _cfg.pod_token)
     except Exception as e:  # noqa: BLE001
         print(f"[app] clear_custom_trackers proxy failed: {e}")
         return JSONResponse(pod_client.pod_unavailable_payload(e), status_code=503)
@@ -207,7 +207,7 @@ async def track_status(tracker_id: str):
     from . import pod_client
 
     try:
-        return await run_in_threadpool(pod_client.track_status, tracker_id)
+        return await run_in_threadpool(pod_client.track_status, tracker_id, _cfg.pod, _cfg.pod_token)
     except Exception as e:  # noqa: BLE001
         print(f"[app] track_status proxy failed: {e}")
         return JSONResponse(pod_client.pod_unavailable_payload(e), status_code=503)

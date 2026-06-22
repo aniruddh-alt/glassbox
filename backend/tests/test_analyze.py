@@ -28,7 +28,7 @@ def test_real_turn_uses_pod_client_and_ranks(monkeypatch):
         lambda i, **k: {"label": f"label-{i}", "max_act": 1.0, "density": 0.001},
     )
 
-    def fake_turn(messages, max_new=None):
+    def fake_turn(messages, pod, pod_token, *, max_new):
         return {
             "answer": "pod answer",
             "candidates": [
@@ -78,7 +78,7 @@ def test_analyze_turn_returns_perf(monkeypatch):
         lambda i, **k: {"label": f"label-{i}", "max_act": 1.0, "density": 0.001},
     )
 
-    def fake_turn_with_timings(messages, max_new=None):
+    def fake_turn_with_timings(messages, pod, pod_token, *, max_new):
         return {
             "answer": "timed answer",
             "candidates": [{"index": 1, "act": 1.0, "attr": 0.5, "source": "s"}],

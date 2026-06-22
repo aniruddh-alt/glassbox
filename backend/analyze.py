@@ -124,8 +124,10 @@ def _real_turn(messages: list[dict]) -> tuple[str, list[dict], dict, dict]:
     pod_roundtrip_ms, ranking_ms, and pod_stages from the pod's additive timings."""
     from . import pod_client
 
+    # Transitional: load cfg here until Task 13 threads AppConfig down to analyze_turn.
+    _cfg = config.load_config()
     _t_pod = time.perf_counter()
-    r = pod_client.turn(messages, max_new=config.MAX_NEW_TOKENS)
+    r = pod_client.turn(messages, _cfg.pod, _cfg.pod_token, max_new=_cfg.model.max_new_tokens)
     pod_roundtrip_ms = (time.perf_counter() - _t_pod) * 1000.0
 
     _t_rank = time.perf_counter()
