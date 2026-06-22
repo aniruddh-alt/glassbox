@@ -19,6 +19,9 @@ from .fanout import fanout, init_sponsors, capture_cognition_alarm, sentry_enabl
 
 _TOKEN_CADENCE_S = 0.012  # replay the (already-generated) answer at a readable typing pace
 
+# Transitional cfg — Task 13 will store this on app.state and thread it properly.
+_cfg = config.load_config()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,7 +33,7 @@ async def lifespan(app: FastAPI):
     independently optional so a missing DSN or Phoenix sidecar logs a warning and the app
     still serves.
     """
-    runtime.start_loading()
+    runtime.start_loading(_cfg)
     init_sponsors()
     yield
 
@@ -43,7 +46,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health() -> dict:
-    return runtime.health_payload()
+    return runtime.health_payload(_cfg)
 
 
 @app.get("/api/observability")
@@ -51,7 +54,7 @@ async def observability_endpoint():
     """Return the in-process store snapshot merged with health, Sentry, and Phoenix UI URL.
     Never contains prompt or response text (store holds only redacted views)."""
     snap = observability.STORE.snapshot()
-    snap["health"] = runtime.health_payload()
+    snap["health"] = runtime.health_payload(_cfg)
     snap["sentry"] = {
         "emit_configured": bool(config.SENTRY_DSN),
         "configured": bool(config.SENTRY_AUTH_TOKEN),
