@@ -166,7 +166,7 @@ def analyze_turn(
             print(f"[analyze] pod turn failed ({e}); synthetic fallback for this turn")
             from . import fallback
 
-            answer, feats = fallback.synth_turn(messages)
+            answer, feats = fallback.synth_turn(messages, _cfg.sae, np_source=_cfg.np_source())
             trackers = {}
             timing_data = {"stages": {}, "pod_stages": {}}
     else:
@@ -176,7 +176,7 @@ def analyze_turn(
             )
         from . import fallback
 
-        answer, feats = fallback.synth_turn(messages)
+        answer, feats = fallback.synth_turn(messages, _cfg.sae, np_source=_cfg.np_source())
         trackers = {}
         timing_data = {"stages": {}, "pod_stages": {}}
 
