@@ -63,7 +63,7 @@ def test_real_turn_degrades_on_pod_failure(monkeypatch):
     import backend.pod_client as pc
 
     monkeypatch.setattr(pc, "turn", lambda *a, **k: (_ for _ in ()).throw(pc.PodError(0, "turn")))
-    monkeypatch.setattr(analyze.runtime, "refresh_pod_health", lambda: None)
+    monkeypatch.setattr(analyze.runtime, "refresh_pod_health", lambda cfg: None)
     answer, event, perf = analyze.analyze_turn([{"role": "user", "content": "Is ibuprofen safe?"}])
     assert isinstance(answer, str) and answer.strip()
     assert len(event.features) > 0
@@ -113,7 +113,7 @@ def test_pod_failure_reports_instrument_unhealthy(monkeypatch):
     import backend.fanout as fo
     calls = []
     monkeypatch.setattr(fo, "report_error", lambda stage, exc, ctx=None: calls.append(stage))
-    monkeypatch.setattr(analyze.runtime, "refresh_pod_health", lambda: None)
+    monkeypatch.setattr(analyze.runtime, "refresh_pod_health", lambda cfg: None)
     runtime.STATE.update(mode="real", model_loaded=True, sae_loaded=True)
     monkeypatch.setattr(pc, "turn", lambda *a, **k: (_ for _ in ()).throw(pc.PodError(0, "turn")))
     analyze.analyze_turn([{"role": "user", "content": "x"}])

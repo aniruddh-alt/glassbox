@@ -14,6 +14,9 @@ from . import config, labels, runtime
 from .events import build_cognition_event
 from .schema import CognitionEvent
 
+# Transitional cfg — Task 11 threads cfg into analyze_turn.
+_cfg = config.load_config()
+
 DEFAULT_CAVEAT = "auto-interp label, may be unreliable"
 
 # Markers that flag a feature LABEL as syntactic / surface-level (grammar, token patterns,
@@ -155,7 +158,7 @@ def analyze_turn(
         try:
             answer, feats, trackers, timing_data = _real_turn(messages)
         except Exception as e:
-            runtime.refresh_pod_health()
+            runtime.refresh_pod_health(_cfg)
             from . import fanout
             fanout.report_error("pod-down", e)  # instrument_unhealthy concern → Sentry (sanitized)
             if strict:

@@ -32,6 +32,8 @@ from . import config, runtime
 from .analyze import analyze_turn
 from .fanout import fanout, init_sponsors
 
+_cfg = config.load_config()  # Transitional cfg — Task 11 threads cfg through call chain.
+
 _FIXTURE = pathlib.Path(__file__).parents[1] / "fixtures" / "medqa_prompts.json"
 
 
@@ -63,7 +65,7 @@ def _load_dataset_prompts(limit: int) -> list[dict]:
 
 
 def _ensure_real_mode() -> None:
-    runtime.refresh_pod_health()
+    runtime.refresh_pod_health(_cfg)
     if runtime.STATE["mode"] != "real":
         print(
             f"[batch] backend mode={runtime.STATE['mode']} — need real (check POD_URL / pod health)",
@@ -117,7 +119,7 @@ def main() -> None:
         print(f"  Q: {question[:100]}{'...' if len(question) > 100 else ''}")
 
         if args.strict:
-            runtime.refresh_pod_health()
+            runtime.refresh_pod_health(_cfg)
             if runtime.STATE["mode"] != "real" or not runtime.STATE.get("pod_reachable", True):
                 print(
                     f"[batch] pod not ready (mode={runtime.STATE['mode']}, "
