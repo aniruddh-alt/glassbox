@@ -129,3 +129,24 @@ def test_load_config_normalizes_pod_url(tmp_path):
     yaml_path.write_text("pod:\n  url: http://pod.example/\n", encoding="utf-8")
     cfg = load_config(yaml_path)
     assert cfg.pod.url == "http://pod.example"
+
+
+def test_example_yaml_loads_and_has_no_secrets():
+    from pathlib import Path
+
+    import yaml
+
+    from backend.config import load_config
+
+    example = Path(__file__).resolve().parents[2] / "config.example.yaml"
+    assert example.exists(), "config.example.yaml must be committed"
+
+    raw = yaml.safe_load(example.read_text())
+    for secret in ("anthropic_api_key", "sentry_dsn", "sentry_auth_token", "pod_token", "hf_token"):
+        assert secret not in raw, f"{secret} must NOT appear in config.example.yaml"
+
+    cfg = load_config(example)
+    assert cfg.runtime.product_name == "GlassBox"
+    assert cfg.model.model_id == "unsloth/gemma-3-4b-it"
+    # the active default prompt stays neutral; medical lives only in a comment block
+    assert "clinical" not in cfg.model.system_prompt.lower()
