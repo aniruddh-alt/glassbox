@@ -8,6 +8,9 @@ from backend import gpu_service
 @pytest.fixture(autouse=True)
 def _skip_pod_load(monkeypatch):
     monkeypatch.setattr(gpu_service, "_attempt_load", lambda: gpu_service.STATE.update(mode="real", model_loaded=True, sae_loaded=True))
+    # Pod auth is opt-in for tests: clear POD_TOKEN so endpoints don't 401 on the ambient
+    # .env/default token. test_auth_rejects_bad_token sets its own token to exercise auth.
+    monkeypatch.setattr(gpu_service.config, "POD_TOKEN", "")
 
 
 def _fake_capture(messages, max_new, *, attribution=None):

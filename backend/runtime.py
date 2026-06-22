@@ -119,4 +119,6 @@ def health_payload() -> dict:
         "sae_recon_ok": STATE.get("sae_recon_ok", ph.get("sae_recon_ok")),
         "pod_reachable": STATE.get("pod_reachable", False),
         "pod_url_configured": bool(config.POD_URL),
+        "anthropic_configured": ph.get("anthropic_configured"),
+        "active_probe_jobs": ph.get("active_probe_jobs"),
     }

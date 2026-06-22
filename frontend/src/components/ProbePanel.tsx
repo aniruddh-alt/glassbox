@@ -90,7 +90,7 @@ export function ProbePanel({
   const customRegistered = (registered ?? []).filter(
     (id) => !(ACTIVE_PROBES as readonly string[]).includes(id) && isEnabled(id),
   );
-  const custom: Row[] = customRegistered.map((name) => {
+  const custom: Row[] = customRegistered.map((name): Row | null => {
     const t = trackers[name];
     if (t) {
       if (t.status && t.status !== "ready") return null;

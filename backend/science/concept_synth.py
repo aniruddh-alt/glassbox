@@ -2,14 +2,52 @@
 
 from __future__ import annotations
 
+import json
 import uuid
+from pathlib import Path
+
+from .. import config
 
 _jobs: dict[str, dict] = {}
+JOBS_DIR = Path(__file__).with_name("probe_jobs")
+_TERMINAL = frozenset({"ready", "rejected", "error"})
 
 
 def _slug(text: str) -> str:
     keep = [c if c.isalnum() else "-" for c in text.lower()]
     return "".join(keep).strip("-")[:24] or "concept"
+
+
+def _persist_job(tracker_id: str) -> None:
+    job = _jobs.get(tracker_id)
+    if job is None:
+        return
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    (JOBS_DIR / f"{tracker_id}.json").write_text(json.dumps(job, indent=2))
+
+
+def load_persisted_jobs(*, mark_orphans: bool = True) -> int:
+    """Reload job records from disk. Orphan in-flight jobs become errors after pod restart."""
+    if not JOBS_DIR.exists():
+        return 0
+    loaded = 0
+    for path in sorted(JOBS_DIR.glob("*.json")):
+        try:
+            job = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        tid = job.get("tracker_id") or path.stem
+        job["tracker_id"] = tid
+        if mark_orphans and job.get("status") not in _TERMINAL:
+            job["status"] = "error"
+            job["error"] = job.get("error") or "pod restarted while build was in progress"
+        _jobs[tid] = job
+        loaded += 1
+    return loaded
+
+
+def active_job_count() -> int:
+    return sum(1 for j in _jobs.values() if j.get("status") not in _TERMINAL)
 
 
 def create_job(request: str) -> str:
@@ -27,6 +65,7 @@ def create_job(request: str) -> str:
         "verdict": None,
         "error": None,
     }
+    _persist_job(tracker_id)
     return tracker_id
 
 
@@ -34,6 +73,7 @@ def update_job(tracker_id: str, **fields) -> None:
     job = _jobs.get(tracker_id)
     if job is not None:
         job.update(fields)
+        _persist_job(tracker_id)
 
 
 def get_job(tracker_id: str) -> dict | None:
@@ -61,20 +101,15 @@ def fit_and_validate(rows: list[dict]) -> dict:
     if len(rows) < 6 or (y == 1).sum() < 3 or (y == 0).sum() < 3:
         return fail
 
-    # act_resp tensors live on the model device (MPS locally, CUDA on the pod); the sklearn /
-    # roc_auc_score calls below need host memory, so move the stack to CPU once here. Without it,
-    # X[...].numpy() raises "can't convert <device> tensor to numpy" and the agent path fails on
-    # any accelerator. persona.train_probe already .cpu()s internally; this covers the direct calls.
-    X = torch.stack([r["act_resp"].float() for r in rows]).cpu()  # [n, d_in], on CPU
+    X = torch.stack([r["act_resp"].float() for r in rows]).cpu()
     idx = np.arange(len(rows))
     try:
         tr, te = train_test_split(idx, test_size=0.3, stratify=y, random_state=0)
     except ValueError:
         return fail
-    if y[te].sum() == 0 or y[te].sum() == len(te):  # held-out has only one class
+    if y[te].sum() == 0 or y[te].sum() == len(te):
         return fail
 
-    # Validation probe trained on the train split only.
     clf, _ = persona.train_probe(X[tr], y[tr])
     probs = clf.predict_proba(X[te].numpy())[:, 1]
     auroc = float(roc_auc_score(y[te], probs))
@@ -82,7 +117,6 @@ def fit_and_validate(rows: list[dict]) -> dict:
     base = LogisticRegression(class_weight="balanced", max_iter=1000).fit(X[tr].numpy(), y[tr])
     baseline_auroc = float(roc_auc_score(y[te], base.predict_proba(X[te].numpy())[:, 1]))
 
-    # Deployable artifacts fit on ALL rows.
     direction = persona.persona_vector(X[y == 1], X[y == 0])
     clf_all, threshold = persona.train_probe(X, y)
     calibrated = clf_all.__class__.__name__ == "CalibratedClassifierCV"
@@ -93,73 +127,100 @@ def fit_and_validate(rows: list[dict]) -> dict:
     }
 
 
-def generate_contrastive(spec: dict, *, generate_fn=None, max_new: int = 64) -> list[dict]:
-    """For each question, run the model under pos and neg system prompts; capture
-    layer-LAYER response-mean (act_resp) and last-prompt-token (act_last) activations.
-    generate_fn defaults to engine.generate_and_capture (injectable for tests)."""
+def generate_contrastive(
+    spec: dict,
+    *,
+    generate_fn=None,
+    max_new: int = 64,
+    on_progress=None,
+) -> list[dict]:
+    """For each question, run the model under pos and neg system prompts; capture activations."""
     if generate_fn is None:
         from .. import engine
 
         def generate_fn(messages, max_new=max_new):
-            # Probe training pools response-mean activations; skip attribution (same as
-            # harmfulness_pipeline) so we always take the full-sequence capture path.
             return engine.generate_and_capture(
                 messages, max_new=max_new, attribution=False
             )
 
     rows: list[dict] = []
+    total = len(spec["questions"]) * 2
+    done = 0
     for label, prompt in ((1, spec["pos_prompt"]), (0, spec["neg_prompt"])):
         for q in spec["questions"]:
             messages = [{"role": "user", "content": f"{prompt}\n\n{q}"}]
             cap = generate_fn(messages, max_new=max_new)
             acts = cap["acts"]
             start = cap["resp_start"]
+            if start <= 0 or acts.shape[0] <= start:
+                raise ValueError("model returned no response tokens for contrastive generation")
             rows.append({
                 "response": cap["answer"],
                 "act_resp": acts[start:].float().mean(0),
                 "act_last": acts[start - 1].float(),
                 "intended_label": label,
             })
+            done += 1
+            if on_progress:
+                on_progress(done, total)
     return rows
 
 
-def judge_filter(spec: dict, rows: list[dict], *, client=None, judge_model: str | None = None) -> list[dict]:
-    """Score each response 1-5 for trait expression; keep rows whose behavior matched the
-    intended side (pos>=4 -> label 1, neg<=2 -> label 0). Drop the ambiguous middle."""
+def _judge_batch(
+    spec: dict,
+    batch: list[dict],
+    *,
+    client,
+    model: str,
+) -> list[int]:
+    """Score one batch of responses; retries once on count mismatch."""
     import json
 
-    from .. import config
     from ..agent import prompts
 
+    responses = [r["response"] for r in batch]
+    last_err: Exception | None = None
+    for attempt in range(2):
+        resp = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            output_config={"format": prompts.judge_schema(len(responses))},
+            messages=[{"role": "user", "content": prompts.judge_prompt(spec, responses)}],
+        )
+        text_blocks = [b.text for b in resp.content if b.type == "text"]
+        if not text_blocks:
+            last_err = ValueError("judge returned no text block (check JUDGE_MODEL / structured output)")
+            continue
+        try:
+            scores = json.loads(text_blocks[0])["scores"]
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            last_err = ValueError(f"judge returned invalid JSON: {e}")
+            continue
+        if len(scores) != len(responses):
+            last_err = ValueError(
+                f"judge returned {len(scores)} scores for {len(responses)} responses"
+            )
+            continue
+        return [int(s) for s in scores]
+    raise last_err or ValueError("judge batch failed")
+
+
+def judge_filter(spec: dict, rows: list[dict], *, client=None, judge_model: str | None = None) -> list[dict]:
+    """Score each response 1-5; keep unambiguous positives (>=4) and negatives (<=2)."""
     if client is None:
         import anthropic
 
         client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     model = judge_model or config.JUDGE_MODEL
+    batch_size = max(1, config.JUDGE_BATCH_SIZE)
 
-    responses = [r["response"] for r in rows]
-    resp = client.messages.create(
-        model=model,
-        max_tokens=2000,
-        thinking={"type": "adaptive"},
-        output_config={"format": prompts.judge_schema(len(responses))},
-        messages=[{"role": "user", "content": prompts.judge_prompt(spec, responses)}],
-    )
-    text_blocks = [b.text for b in resp.content if b.type == "text"]
-    if not text_blocks:
-        raise ValueError("judge returned no text block (check JUDGE_MODEL / structured output)")
-    text = text_blocks[0]
-    try:
-        scores = json.loads(text)["scores"]
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
-        raise ValueError(f"judge returned invalid JSON: {e}") from e
-    if len(scores) != len(responses):
-        raise ValueError(
-            f"judge returned {len(scores)} scores for {len(responses)} responses"
-        )
+    all_scores: list[int] = []
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i : i + batch_size]
+        all_scores.extend(_judge_batch(spec, batch, client=client, model=model))
 
     kept: list[dict] = []
-    for row, score in zip(rows, scores):
+    for row, score in zip(rows, all_scores):
         if row["intended_label"] == 1 and score >= 4:
             kept.append({**row, "label": 1})
         elif row["intended_label"] == 0 and score <= 2:

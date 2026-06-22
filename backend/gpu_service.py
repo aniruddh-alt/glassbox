@@ -70,6 +70,11 @@ def _attempt_load() -> None:
         loaded = persona.load_artifacts(exclude=config.DISABLED_TRACKERS)
         if loaded:
             print(f"[gpu_service] loaded probe trackers: {', '.join(loaded)}")
+        from .science import concept_synth as cs
+
+        n = cs.load_persisted_jobs(mark_orphans=True)
+        if n:
+            print(f"[gpu_service] restored {n} probe job record(s) from disk")
         STATE["mode"] = "real"
         _run_recon_check()
     except Exception as e:  # noqa: BLE001
@@ -172,6 +177,7 @@ def _startup() -> None:
 
 @app.get("/health")
 def health() -> dict:
+    from .science import concept_synth as cs
     from .science import sae
     from .science.persona import _trackers
 
@@ -185,6 +191,8 @@ def health() -> dict:
         "trackers": list(_trackers.keys()),
         "sae_recon_cosine": STATE.get("sae_recon_cosine"),
         "sae_recon_ok": STATE.get("sae_recon_ok"),
+        "anthropic_configured": bool(config.ANTHROPIC_API_KEY),
+        "active_probe_jobs": cs.active_job_count(),
     }
 
 

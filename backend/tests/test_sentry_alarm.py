@@ -41,7 +41,8 @@ def test_capture_cognition_alarm_requires_flag(monkeypatch):
         },
         flush=True,
     ) is True
-    assert captured["msg"] == "Confident-wrong medical answer"
+    assert captured["msg"].startswith("Confident-wrong medical answer")
+    assert "over_confidence" in captured["msg"]
 
 
 def test_replay_sentry_endpoint(monkeypatch):

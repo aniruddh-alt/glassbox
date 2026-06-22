@@ -10,17 +10,36 @@ _UA = {"User-Agent": "glassbox-orchestration/0.1"}
 class PodError(Exception):
     """Raised when the pod is unreachable or returns a non-2xx response.
 
-    Carries ONLY a status code and a static stage label — NEVER the response body,
-    because the body may echo the model answer and would leak to Sentry via report_error.
+    `detail` may carry safe setup errors (e.g. missing API key) for whitelisted endpoints.
+    Never embed /turn response bodies — they may contain model output.
     """
 
-    def __init__(self, status: int, stage: str) -> None:
+    def __init__(self, status: int, stage: str, *, detail: str = "") -> None:
         self.status = status
         self.stage = stage
+        self.detail = detail
         super().__init__(str(self))
 
     def __str__(self) -> str:
+        if self.detail:
+            return f"pod {self.stage} failed: {self.detail}"
         return f"pod {self.stage} failed: HTTP {self.status}"
+
+
+def pod_unavailable_payload(exc: Exception) -> dict:
+    """Map pod client errors to a JSON body safe for the Build UI."""
+    if isinstance(exc, PodError):
+        if exc.status == 0:
+            detail = "Cannot reach GPU pod — start the SSH tunnel and gpu_service"
+        elif exc.detail:
+            detail = exc.detail
+        else:
+            detail = f"GPU pod error during {exc.stage} (HTTP {exc.status})"
+        return {"status": "unavailable", "detail": detail}
+    if isinstance(exc, ConnectionError):
+        return {"status": "unavailable", "detail": "POD_URL is not configured on the backend"}
+    msg = str(exc) or type(exc).__name__
+    return {"status": "unavailable", "detail": msg}
 
 
 def _headers() -> dict[str, str]:
@@ -175,7 +194,15 @@ def track_status(tracker_id: str) -> dict:
     except httpx.HTTPError as e:
         raise PodError(0, "track_status") from e
     if r.status_code == 404:
-        return {"status": "unknown"}
+        return {"status": "unknown", "detail": "job not found — pod may have restarted"}
     if r.status_code != 200:
+        detail = ""
+        try:
+            detail = str(r.json().get("detail") or "")
+        except Exception:  # noqa: BLE001
+            detail = ""
+        print(f"[pod] track_status HTTP {r.status_code}: {(detail or r.text)[:200]}")
+        if detail:
+            return {"status": "unavailable", "detail": detail}
         raise PodError(r.status_code, "track_status")
     return r.json()

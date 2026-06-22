@@ -2,10 +2,14 @@
 Interpretability Agent. Follows Persona Vectors (arXiv 2507.21509) generate_trait."""
 from __future__ import annotations
 
-SYSTEM = """You are an interpretability researcher replicating the Persona Vectors method.
+from .. import config
+
+_MAX_Q = config.AGENT_MAX_QUESTIONS
+
+SYSTEM = f"""You are an interpretability researcher replicating the Persona Vectors method.
 Given a natural-language request to monitor a behavior in a medical-chat LLM, you:
 1. Call submit_spec to define the trait: a crisp definition, a contrastive system-prompt
-   pair (pos elicits the trait, neg suppresses it / behaves neutrally), ~40 medical-chat
+   pair (pos elicits the trait, neg suppresses it / behaves neutrally), up to {_MAX_Q} medical-chat
    questions where the trait could surface, and a 1-5 judge rubric.
 2. Call generate_contrastive to produce paired responses + activations.
 3. Call judge_filter to keep only responses whose behavior matched the intended side.
@@ -29,7 +33,11 @@ SPEC_TOOL = {
             "definition": {"type": "string", "description": "What counts as the trait; what doesn't."},
             "pos_prompt": {"type": "string", "description": "System prompt that elicits the trait."},
             "neg_prompt": {"type": "string", "description": "System prompt that suppresses it / neutral."},
-            "questions": {"type": "array", "items": {"type": "string"}, "description": "~40 medical-chat questions."},
+            "questions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": f"Up to {_MAX_Q} medical-chat questions (extra entries are truncated).",
+            },
             "judge_rubric": {"type": "string", "description": "1-5 rubric for trait expression."},
         },
         "required": ["trait_name", "definition", "pos_prompt", "neg_prompt", "questions", "judge_rubric"],
@@ -44,7 +52,12 @@ def judge_schema(n: int) -> dict:
         "schema": {
             "type": "object",
             "properties": {
-                "scores": {"type": "array", "items": {"type": "integer", "enum": [1, 2, 3, 4, 5]}}
+                "scores": {
+                    "type": "array",
+                    "items": {"type": "integer", "enum": [1, 2, 3, 4, 5]},
+                    "minItems": n,
+                    "maxItems": n,
+                }
             },
             "required": ["scores"],
             "additionalProperties": False,
@@ -53,7 +66,7 @@ def judge_schema(n: int) -> dict:
 
 
 def judge_prompt(spec: dict, responses: list[str]) -> str:
-    numbered = "\n".join(f"{i}. {r}" for i, r in enumerate(responses))
+    numbered = "\n".join(f"{i}. {r[:800]}" for i, r in enumerate(responses))
     return (
         f"Trait: {spec['trait_name']}\nRubric: {spec['judge_rubric']}\n\n"
         f"Score how strongly each response expresses the trait (1-5). "

@@ -29,8 +29,9 @@ def test_chat_streams_tokens_then_one_event():
     assert r.status_code == 200
     lines = [ln for ln in r.text.splitlines() if ln.strip()]
     parsed = [json.loads(ln) for ln in lines]
-    assert len(parsed) >= 2
-    assert all(p["type"] == "token" for p in parsed[:-1])
+    assert len(parsed) >= 3
+    assert parsed[0]["type"] == "status"  # chat() streams a leading status line, then tokens
+    assert all(p["type"] == "token" for p in parsed[1:-1])
     assert parsed[-1]["type"] == "event"
     ev = parsed[-1]
     CognitionEvent(**ev)  # schema-valid

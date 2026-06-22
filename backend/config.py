@@ -102,10 +102,11 @@ DISABLED_TRACKERS = frozenset({"uncertainty", "hallucination", "risk_awareness"}
 # --- GPU pod (orchestration → remote torch service) ---
 # Defaults wire to the local SSH tunnel (scripts/tunnel_pod.sh → localhost:8001) so the backend
 # reaches the pod no matter how it's launched — a bare `uvicorn backend.app:app` without the env
-# vars set would otherwise silently fall back to synthetic/offline. Override via env for other
-# setups; POD_TOKEN is the shared dev secret (move it to a .env before any public/shared deploy).
+# vars set would otherwise silently fall back to synthetic/offline. Override via env for other setups.
+# POD_TOKEN is the shared pod-auth secret: set it in .env (and on the pod) so it stays out of source.
+# An empty token means the pod serves without auth — only acceptable for a tunnel-only / local pod.
 POD_URL = os.getenv("POD_URL", "http://localhost:8001").rstrip("/")
-POD_TOKEN = os.getenv("POD_TOKEN", "glassbox-dev-secret")
+POD_TOKEN = os.getenv("POD_TOKEN", "")
 POD_TIMEOUT = float(os.getenv("POD_TIMEOUT", "120"))
 POD_POLL_INTERVAL = float(os.getenv("POD_POLL_INTERVAL", "5"))
 
@@ -115,6 +116,7 @@ AGENT_MODEL = os.getenv("AGENT_MODEL", "claude-opus-4-8")
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", "claude-opus-4-8")
 # Cap contrastive questions so judge_filter stays within Claude context/time limits (~40×2 rows is fragile).
 AGENT_MAX_QUESTIONS = int(os.getenv("AGENT_MAX_QUESTIONS", "12"))
+JUDGE_BATCH_SIZE = int(os.getenv("JUDGE_BATCH_SIZE", "8"))
 
 # --- Runtime ---
 MODE = os.getenv("GLASSBOX_MODE", "posthoc")  # posthoc | live
@@ -141,13 +143,10 @@ Be clear and well-structured. Define abbreviations on first use. When a question
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", _DEFAULT_SYSTEM_PROMPT)
 DEVICE = os.getenv("DEVICE", "cuda")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-# Hackathon default so Sentry works out of the box. Override via the SENTRY_DSN env var
-# (or a .env) — and move it OUT of source before any public/shared deploy: a committed
-# DSN lets anyone who finds it write events into this project. It is NOT read access.
-SENTRY_DSN = os.getenv(
-    "SENTRY_DSN",
-    "https://296000e0a9e12dd30d23a38c373df8eb@o4511600334536704.ingest.us.sentry.io/4511600481206272",
-)
+# Sentry ingest DSN — set it in .env (kept out of source). A DSN is write-only: a holder can send
+# events into this project but gets NO read access. Empty DSN disables Sentry (init_sponsors skips
+# sentry_sdk.init when unset). Read access is governed separately by SENTRY_AUTH_TOKEN.
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", "hackathon")
 SENTRY_RELEASE = os.getenv("SENTRY_RELEASE") or None  # None → Sentry auto-detects git SHA
 # PHI gate: when false, the raw user_msg/response are NOT attached to Sentry events.

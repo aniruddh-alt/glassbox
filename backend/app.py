@@ -135,21 +135,19 @@ def _chunks(text: str) -> list[str]:
 
 @app.post("/api/chat")
 async def chat(body: dict):
-    """Generate (or synthesize) a turn, stream token lines, then exactly one event line.
-    fanout() runs AFTER the event line so nothing blocks the stream."""
+    """Generate a turn, stream status + token replay, then one CognitionEvent line."""
     messages = body.get("messages") or []
     turn_start_ns = time.time_ns()
-    answer, event, perf = await run_in_threadpool(analyze_turn, messages)
-    perf["t0_ns"] = turn_start_ns
-    payload = event.model_dump()
-
-    # Record sponsors immediately — do not wait for the client to drain the NDJSON stream.
-    try:
-        fanout(payload, perf)
-    except Exception as e:  # never let a sponsor error break the response
-        print(f"[app] fanout failed: {e}")
 
     async def gen():
+        yield json.dumps({"type": "status", "text": "Generating response and running probes…"}) + "\n"
+        answer, event, perf = await run_in_threadpool(analyze_turn, messages)
+        perf["t0_ns"] = turn_start_ns
+        payload = event.model_dump()
+        try:
+            fanout(payload, perf)
+        except Exception as e:
+            print(f"[app] fanout failed: {e}")
         for chunk in _chunks(answer):
             yield json.dumps(
                 {"type": "token", "text": chunk, "top_features": [], "uncertainty": None}
@@ -177,29 +175,27 @@ async def analyze(body: dict):
 
 @app.post("/api/track")
 async def track(body: dict):
-    """Proxy an NL monitoring request to the GPU pod, which trains and registers the probe where
-    the model and live trackers live (gpu_service /api/track). Non-fatal: a missing or unreachable
-    pod returns an 'unavailable' status instead of crashing the request."""
+    """Proxy an NL monitoring request to the GPU pod."""
     from . import pod_client
 
     request = body.get("request") or body.get("concept") or body.get("name") or ""
     try:
         return await run_in_threadpool(pod_client.track, request)
-    except Exception as e:  # noqa: BLE001 - pod down / not configured
+    except Exception as e:  # noqa: BLE001
         print(f"[app] track proxy failed: {e}")
-        return JSONResponse({"status": "unavailable"}, status_code=503)
+        return JSONResponse(pod_client.pod_unavailable_payload(e), status_code=503)
 
 
 @app.post("/api/trackers/clear-custom")
 async def clear_custom_trackers():
-    """Proxy custom-probe cleanup to the GPU pod (in-memory + artifact files)."""
+    """Proxy custom-probe cleanup to the GPU pod."""
     from . import pod_client
 
     try:
         return await run_in_threadpool(pod_client.clear_custom_trackers)
-    except Exception as e:  # noqa: BLE001 - pod down / not configured
+    except Exception as e:  # noqa: BLE001
         print(f"[app] clear_custom_trackers proxy failed: {e}")
-        return JSONResponse({"status": "unavailable"}, status_code=503)
+        return JSONResponse(pod_client.pod_unavailable_payload(e), status_code=503)
 
 
 @app.get("/api/track/{tracker_id}")
@@ -209,9 +205,9 @@ async def track_status(tracker_id: str):
 
     try:
         return await run_in_threadpool(pod_client.track_status, tracker_id)
-    except Exception as e:  # noqa: BLE001 - pod down / not configured
+    except Exception as e:  # noqa: BLE001
         print(f"[app] track_status proxy failed: {e}")
-        return JSONResponse({"status": "unavailable"}, status_code=503)
+        return JSONResponse(pod_client.pod_unavailable_payload(e), status_code=503)
 
 
 @app.get("/api/feature/{index}")
