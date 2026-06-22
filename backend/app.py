@@ -58,8 +58,8 @@ async def observability_endpoint():
     snap["sentry"] = {
         "emit_configured": bool(config.SENTRY_DSN),
         "configured": bool(config.SENTRY_AUTH_TOKEN),
-        "deep_link": sentry_api.deep_link(),
-        "issues": await sentry_api.list_recent_issues(),
+        "deep_link": sentry_api.deep_link(_cfg.observability.sentry, _cfg.sentry_auth_token),
+        "issues": await sentry_api.list_recent_issues(_cfg.observability.sentry, _cfg.sentry_auth_token),
     }
     snap["phoenix_ui_url"] = config.PHOENIX_UI_URL
     return snap

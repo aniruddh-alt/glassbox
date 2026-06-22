@@ -5,34 +5,23 @@ from __future__ import annotations
 
 import httpx
 
-from . import config
-
 _ISSUE_FIELDS = ("id", "shortId", "title", "culprit", "level", "count", "userCount", "lastSeen", "permalink")
 
 
-def deep_link() -> str | None:
+def deep_link(sentry, token: str) -> str | None:
     """Return the Sentry issues deep-link URL when configured, else None."""
-    if config.SENTRY_ORG_SLUG and config.SENTRY_AUTH_TOKEN:
-        return f"{config.SENTRY_ORG_URL}/organizations/{config.SENTRY_ORG_SLUG}/issues/"
+    if sentry.org_slug and token:
+        return f"{sentry.org_url}/organizations/{sentry.org_slug}/issues/"
     return None
 
 
-async def list_recent_issues(limit: int = 15) -> list[dict]:
-    """GET recent unresolved issues from Sentry.
-
-    Returns [] when unconfigured (no token/slugs) or on any httpx/JSON error.
-    Projects only the fields in _ISSUE_FIELDS (drops extras).
-    """
-    if not config.SENTRY_AUTH_TOKEN or not config.SENTRY_ORG_SLUG or not config.SENTRY_PROJECT_SLUG:
+async def list_recent_issues(sentry, token: str, limit: int = 15) -> list[dict]:
+    """GET recent unresolved issues from Sentry. Returns [] when unconfigured or on any error."""
+    if not token or not sentry.org_slug or not sentry.project_slug:
         return []
-    url = f"{config.SENTRY_API_BASE}/api/0/projects/{config.SENTRY_ORG_SLUG}/{config.SENTRY_PROJECT_SLUG}/issues/"
-    params = {
-        "statsPeriod": "24h",
-        "query": "is:unresolved",
-        "sort": "date",
-        "limit": limit,
-    }
-    headers = {"Authorization": f"Bearer {config.SENTRY_AUTH_TOKEN}"}
+    url = f"{sentry.api_base}/api/0/projects/{sentry.org_slug}/{sentry.project_slug}/issues/"
+    params = {"statsPeriod": "24h", "query": "is:unresolved", "sort": "date", "limit": limit}
+    headers = {"Authorization": f"Bearer {token}"}
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(url, params=params, headers=headers)

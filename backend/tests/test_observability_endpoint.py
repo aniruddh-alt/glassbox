@@ -31,7 +31,7 @@ def test_observability_endpoint_shape(monkeypatch):
     """GET /api/observability returns the §7 merged shape with health, sentry, phoenix_ui_url."""
     monkeypatch.setattr(observability.STORE, "snapshot", lambda: _empty_snapshot())
     # list_recent_issues is async; monkeypatch with a coroutine function
-    async def _no_issues(limit=15):
+    async def _no_issues(sentry, token, limit=15):
         return []
     monkeypatch.setattr(sentry_api, "list_recent_issues", _no_issues)
 
@@ -77,7 +77,7 @@ def test_observability_endpoint_no_pii(monkeypatch):
         }
     ]
     monkeypatch.setattr(observability.STORE, "snapshot", lambda: snap)
-    async def _no_issues(limit=15):
+    async def _no_issues(sentry, token, limit=15):
         return []
     monkeypatch.setattr(sentry_api, "list_recent_issues", _no_issues)
 
@@ -92,7 +92,7 @@ def test_observability_endpoint_no_pii(monkeypatch):
 def test_observability_endpoint_sentry_issues_forwarded(monkeypatch):
     """Issues returned by sentry_api are forwarded in the sentry.issues list."""
     monkeypatch.setattr(observability.STORE, "snapshot", lambda: _empty_snapshot())
-    async def _with_issues(limit=15):
+    async def _with_issues(sentry, token, limit=15):
         return [{"shortId": "G-1", "title": "Confident-wrong medical answer", "level": "warning",
                  "count": 3, "lastSeen": "2026-06-21", "permalink": "https://sentry.io/issues/1"}]
     monkeypatch.setattr(sentry_api, "list_recent_issues", _with_issues)
