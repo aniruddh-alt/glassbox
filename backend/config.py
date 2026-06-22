@@ -287,6 +287,86 @@ RECON_MIN_COSINE = float(os.getenv("RECON_MIN_COSINE", "0.85"))
 RECON_PROBE = os.getenv("RECON_PROBE", "Is ibuprofen safe during the third trimester of pregnancy?")
 
 
+# --------------------------------------------------------------------------- #
+# load_config — Task 3                                                        #
+# --------------------------------------------------------------------------- #
+
+_CFG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+
+_SECRET_KEYS = (
+    "anthropic_api_key",
+    "sentry_dsn",
+    "sentry_auth_token",
+    "pod_token",
+    "hf_token",
+)
+
+
+def _env_overrides() -> dict:
+    """Collect GLASSBOX__SECTION__FIELD env vars into a nested dict (env beats YAML)."""
+    nested: dict = {}
+    for key, val in os.environ.items():
+        if not key.startswith("GLASSBOX__"):
+            continue
+        parts = [p.lower() for p in key[len("GLASSBOX__"):].split("__") if p]
+        if not parts:
+            continue
+        cursor = nested
+        for p in parts[:-1]:
+            cursor = cursor.setdefault(p, {})
+        cursor[parts[-1]] = val
+    return nested
+
+
+def _deep_merge(base: dict, over: dict) -> dict:
+    out = dict(base)
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def load_config(path: str | Path | None = None) -> AppConfig:
+    """Build the AppConfig once. Structure from YAML (env override); secrets from env only.
+
+    Order of precedence (lowest → highest):
+      1. Gemma + Gemma-Scope defaults baked into the pydantic models.
+      2. Structure from config.yaml (path arg, else repo-root config.yaml). Absent → defaults
+         only, so the app still boots.
+      3. Per-field env override: GLASSBOX__SECTION__FIELD (nested delimiter "__").
+      4. Secrets from env / .env via the Secrets object — env-ONLY, never YAML.
+    """
+    cfg_path = Path(path) if path is not None else _CFG_PATH
+
+    raw: dict = {}
+    if cfg_path.exists():
+        raw = yaml.safe_load(cfg_path.read_text()) or {}
+        for k in _SECRET_KEYS:  # defense-in-depth: never honor secrets from YAML
+            raw.pop(k, None)
+
+    raw = _deep_merge(raw, _env_overrides())
+    cfg = AppConfig.model_validate(raw)
+
+    # _env_file=None: .env is already loaded into os.environ by load_dotenv above;
+    # disabling the pydantic-settings .env reader ensures monkeypatch.delenv works
+    # cleanly in tests and avoids double-read in production.
+    secrets = Secrets(_env_file=None)
+    cfg.anthropic_api_key = secrets.anthropic_api_key
+    cfg.sentry_dsn = secrets.sentry_dsn
+    cfg.sentry_auth_token = secrets.sentry_auth_token
+    cfg.pod_token = secrets.pod_token
+    cfg.hf_token = secrets.hf_token
+
+    cfg.pod.url = cfg.pod.url.rstrip("/")
+    return cfg
+
+
+# --------------------------------------------------------------------------- #
+# LEGACY helpers                                                               #
+# --------------------------------------------------------------------------- #
+
 def sae_id_for_layer(layer: int = LAYER) -> str:
     """Gemma Scope width-16k SAE id for a residual `layer` (defaults to LAYER=17).
     An explicit SAE_ID env var, when set, overrides the per-layer id."""

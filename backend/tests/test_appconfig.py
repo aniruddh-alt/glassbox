@@ -76,3 +76,56 @@ def test_appconfig_assembles_and_derives_ids():
     assert cfg.sae_id(22) == "layer_22_width_16k_l0_medium"
     assert cfg.np_source() == "17-gemmascope-2-res-16k"
     assert cfg.np_source(9) == "9-gemmascope-2-res-16k"
+
+
+def test_load_config_defaults_when_no_yaml(tmp_path):
+    from backend.config import load_config
+
+    missing = tmp_path / "nope.yaml"
+    cfg = load_config(missing)
+    assert cfg.model.model_id == "unsloth/gemma-3-4b-it"
+    assert cfg.model.layer == 17
+    assert cfg.pod.url == "http://localhost:8001"
+
+
+def test_load_config_yaml_then_env_override(tmp_path, monkeypatch):
+    from backend.config import load_config
+
+    yaml_path = tmp_path / "config.yaml"
+    yaml_path.write_text(
+        "model:\n  layer: 22\nruntime:\n  product_name: Demo\n", encoding="utf-8"
+    )
+    cfg = load_config(yaml_path)
+    assert cfg.model.layer == 22  # from YAML
+    assert cfg.runtime.product_name == "Demo"
+
+    monkeypatch.setenv("GLASSBOX__MODEL__LAYER", "29")
+    cfg2 = load_config(yaml_path)
+    assert cfg2.model.layer == 29  # env beats YAML
+
+
+def test_load_config_ignores_secrets_in_yaml(tmp_path, monkeypatch):
+    from backend.config import load_config
+
+    yaml_path = tmp_path / "config.yaml"
+    yaml_path.write_text(
+        "anthropic_api_key: leaked-from-yaml\npod_token: leaked\n", encoding="utf-8"
+    )
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("POD_TOKEN", raising=False)
+    cfg = load_config(yaml_path)
+    assert cfg.anthropic_api_key == ""  # YAML secret popped, env empty
+    assert cfg.pod_token == ""
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
+    cfg2 = load_config(yaml_path)
+    assert cfg2.anthropic_api_key == "sk-from-env"  # env is the only source
+
+
+def test_load_config_normalizes_pod_url(tmp_path):
+    from backend.config import load_config
+
+    yaml_path = tmp_path / "config.yaml"
+    yaml_path.write_text("pod:\n  url: http://pod.example/\n", encoding="utf-8")
+    cfg = load_config(yaml_path)
+    assert cfg.pod.url == "http://pod.example"
