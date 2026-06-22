@@ -144,7 +144,7 @@ async def chat(body: dict):
 
     async def gen():
         yield json.dumps({"type": "status", "text": "Generating response and running probes…"}) + "\n"
-        answer, event, perf = await run_in_threadpool(analyze_turn, messages)
+        answer, event, perf = await run_in_threadpool(analyze_turn, messages, _cfg)
         perf["t0_ns"] = turn_start_ns
         payload = event.model_dump()
         try:
@@ -166,7 +166,7 @@ async def analyze(body: dict):
     """Post-hoc / non-streaming variant: returns the CognitionEvent as JSON."""
     messages = body.get("messages") or []
     turn_start_ns = time.time_ns()
-    _, event, perf = await run_in_threadpool(analyze_turn, messages)
+    _, event, perf = await run_in_threadpool(analyze_turn, messages, _cfg)
     perf["t0_ns"] = turn_start_ns
     payload = event.model_dump()
     try:

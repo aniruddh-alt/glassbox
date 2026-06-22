@@ -130,6 +130,7 @@ def main() -> None:
         t0 = time.time()
         answer, event, _perf = analyze_turn(
             [{"role": "user", "content": question}],
+            _cfg,
             message_id=qid,
             strict=args.strict,
         )
