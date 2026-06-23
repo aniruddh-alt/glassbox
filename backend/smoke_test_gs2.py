@@ -18,7 +18,9 @@ import time
 import torch
 import torch.nn as nn
 
-from backend import config
+from backend.config import load_config as _load_config
+
+_cfg = _load_config()
 
 MODEL_ID = os.getenv("MODEL_ID", "unsloth/gemma-3-4b-it")
 SAE_RELEASE = os.getenv("SAE_RELEASE", "gemma-scope-2-4b-it-res")
@@ -80,7 +82,7 @@ def get_label(index, cache):
 
 
 def main():
-    dev = config.resolve_device()
+    dev = _cfg.resolve_device()
     dtype = torch.float32 if dev == "cpu" else torch.bfloat16
     print(
         f"[device] {dev}   model={MODEL_ID}   sae={SAE_RELEASE}/{SAE_ID}   layer={LAYER}"
@@ -149,7 +151,7 @@ def main():
     ok = "OK" if cos > 0.85 else "!! LOW (layer/dtype?)"
     print(f"[sanity] reconstruction cosine={cos:.3f} rel_mse={rel:.3f} [{ok}]")
 
-    def topk(a, k=config.TOPK):
+    def topk(a, k=_cfg.feature_cloud.topk):
         a = a.detach().reshape(-1).float().to(next(sae.parameters()).device)
         with torch.no_grad():
             f = sae.encode(a.unsqueeze(0)).squeeze(0)
@@ -158,7 +160,7 @@ def main():
             (int(ii), float(vv)) for vv, ii in zip(v.tolist(), i.tolist()) if vv > 0
         ]
 
-    special = {tok.convert_tokens_to_ids(t) for t in config.MASK_TOKENS}
+    special = {tok.convert_tokens_to_ids(t) for t in _cfg.model.mask_tokens}
     ids_full = out[0].tolist()
     best = {}
     for pos in range(resp_start, acts.shape[0]):
@@ -166,7 +168,7 @@ def main():
             continue
         for ii, vv in topk(acts[pos]):
             best[ii] = max(best.get(ii, 0.0), vv)
-    top = sorted(best.items(), key=lambda kv: -kv[1])[: config.TOPK_EVENT]
+    top = sorted(best.items(), key=lambda kv: -kv[1])[: _cfg.feature_cloud.topk_event]
     cache = {}
     print(f"[cloud] {len(best)} unique features; top 12 with Gemma-Scope-2 labels:")
     for i, v in top[:12]:

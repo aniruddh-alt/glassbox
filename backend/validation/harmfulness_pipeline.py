@@ -16,6 +16,7 @@ from typing import Protocol
 import numpy as np
 
 from backend import config
+from backend.config import load_config as _load_config
 from backend.science import persona
 
 
@@ -225,8 +226,9 @@ def sweep_layers(
 
 
 def _pick_best(sweep: list[dict]) -> dict:
-    """Prefer higher AUROC; on ties prefer the layer closest to config.LAYER (runtime hook)."""
-    return max(sweep, key=lambda r: (r["auroc"], -abs(r["layer"] - config.LAYER)))
+    """Prefer higher AUROC; on ties prefer the layer closest to the configured model layer."""
+    _default_layer = _load_config().model.layer
+    return max(sweep, key=lambda r: (r["auroc"], -abs(r["layer"] - _default_layer)))
 
 
 def write_ready_artifact(
@@ -341,7 +343,7 @@ class LexicalSmokeProvider:
 
 def _parse_layers(raw: str | None) -> list[int]:
     if not raw:
-        return list(config.SAE_LAYERS)
+        return list(_load_config().sae.sae_layers)
     return [int(x.strip()) for x in raw.split(",") if x.strip()]
 
 
@@ -375,7 +377,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--artifact", default=None, help="Single artifact JSON path")
     p.add_argument("--all", action="store_true", help="Train every artifact in science/artifacts/")
     p.add_argument("--force", action="store_true", help="Retrain even when direction already exists")
-    p.add_argument("--layers", default=",".join(map(str, config.SAE_LAYERS)))
+    p.add_argument("--layers", default=",".join(map(str, _load_config().sae.sae_layers)))
     p.add_argument("--provider", choices=["engine", "smoke"], default="engine")
     p.add_argument("--max-new", type=int, default=128)
     p.add_argument("--min-auroc", type=float, default=0.7)
