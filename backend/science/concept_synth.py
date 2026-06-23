@@ -6,8 +6,6 @@ import json
 import uuid
 from pathlib import Path
 
-from .. import config
-
 _jobs: dict[str, dict] = {}
 JOBS_DIR = Path(__file__).with_name("probe_jobs")
 _TERMINAL = frozenset({"ready", "rejected", "error"})
@@ -205,14 +203,18 @@ def _judge_batch(
     raise last_err or ValueError("judge batch failed")
 
 
-def judge_filter(spec: dict, rows: list[dict], *, client=None, judge_model: str | None = None) -> list[dict]:
-    """Score each response 1-5; keep unambiguous positives (>=4) and negatives (<=2)."""
+def judge_filter(spec: dict, rows: list[dict], builder, anthropic_api_key: str, *, client=None) -> list[dict]:
+    """Score each response 1-5; keep unambiguous positives (>=4) and negatives (<=2).
+
+    builder: ProbeBuilderConfig providing judge_model + judge_batch_size.
+    anthropic_api_key: Claude key; used only when `client` is not injected.
+    """
     if client is None:
         import anthropic
 
-        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-    model = judge_model or config.JUDGE_MODEL
-    batch_size = max(1, config.JUDGE_BATCH_SIZE)
+        client = anthropic.Anthropic(api_key=anthropic_api_key)
+    model = builder.judge_model
+    batch_size = max(1, builder.judge_batch_size)
 
     all_scores: list[int] = []
     for i in range(0, len(rows), batch_size):

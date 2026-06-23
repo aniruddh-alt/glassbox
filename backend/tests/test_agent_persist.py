@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from backend.agent import tools
+from backend.config import ModelConfig
 from backend.science import persona
 
 
@@ -44,7 +45,7 @@ def test_persist_artifact_round_trip_scores_graded(tmp_path, monkeypatch):
     fit = {"direction": direction, "threshold": 0.5, "auroc": 1.0}
     ctx = {"tracker_id": "over-conf-test", "request": "flag over-confidence",
            "spec": {"trait_name": "over_confidence"}, "rows": rows}
-    tools._persist_artifact(ctx, fit)
+    tools._persist_artifact(ctx, fit, ModelConfig())
 
     art = tmp_path / "over-conf-test.json"
     assert art.exists()

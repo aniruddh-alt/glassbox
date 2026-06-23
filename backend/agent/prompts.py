@@ -2,15 +2,16 @@
 Interpretability Agent. Follows Persona Vectors (arXiv 2507.21509) generate_trait."""
 from __future__ import annotations
 
-from .. import config
 
-_MAX_Q = config.AGENT_MAX_QUESTIONS
-
-SYSTEM = f"""You are an interpretability researcher replicating the Persona Vectors method.
-Given a natural-language request to monitor a behavior in a medical-chat LLM, you:
+def system_prompt(builder) -> str:
+    """Render the agent system prompt. `builder` is a ProbeBuilderConfig; its
+    `agent_max_questions` caps the contrastive question count."""
+    max_q = builder.agent_max_questions
+    return f"""You are an interpretability researcher replicating the Persona Vectors method.
+Given a natural-language request to monitor a behavior in a language model, you:
 1. Call submit_spec to define the trait: a crisp definition, a contrastive system-prompt
-   pair (pos elicits the trait, neg suppresses it / behaves neutrally), up to {_MAX_Q} medical-chat
-   questions where the trait could surface, and a 1-5 judge rubric.
+   pair (pos elicits the trait, neg suppresses it / behaves neutrally), up to {max_q} questions
+   where the trait could surface, and a 1-5 judge rubric.
 2. Call generate_contrastive to produce paired responses + activations.
 3. Call judge_filter to keep only responses whose behavior matched the intended side.
 4. Call fit_and_validate to train a probe and measure held-out AUROC vs a baseline.
@@ -22,28 +23,33 @@ Given a natural-language request to monitor a behavior in a medical-chat LLM, yo
    concept is worth monitoring.
 Call exactly one tool per step, in order. Do not skip steps."""
 
-SPEC_TOOL = {
-    "name": "submit_spec",
-    "description": "Define the contrastive trait spec (Persona Vectors generate_trait).",
-    "strict": True,
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "trait_name": {"type": "string"},
-            "definition": {"type": "string", "description": "What counts as the trait; what doesn't."},
-            "pos_prompt": {"type": "string", "description": "System prompt that elicits the trait."},
-            "neg_prompt": {"type": "string", "description": "System prompt that suppresses it / neutral."},
-            "questions": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": f"Up to {_MAX_Q} medical-chat questions (extra entries are truncated).",
+
+def spec_tool(builder) -> dict:
+    """Render the submit_spec tool schema. `builder` is a ProbeBuilderConfig; its
+    `agent_max_questions` caps the contrastive question count."""
+    max_q = builder.agent_max_questions
+    return {
+        "name": "submit_spec",
+        "description": "Define the contrastive trait spec (Persona Vectors generate_trait).",
+        "strict": True,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "trait_name": {"type": "string"},
+                "definition": {"type": "string", "description": "What counts as the trait; what doesn't."},
+                "pos_prompt": {"type": "string", "description": "System prompt that elicits the trait."},
+                "neg_prompt": {"type": "string", "description": "System prompt that suppresses it / neutral."},
+                "questions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": f"Up to {max_q} questions where the trait could surface (extra entries are truncated).",
+                },
+                "judge_rubric": {"type": "string", "description": "1-5 rubric for trait expression."},
             },
-            "judge_rubric": {"type": "string", "description": "1-5 rubric for trait expression."},
+            "required": ["trait_name", "definition", "pos_prompt", "neg_prompt", "questions", "judge_rubric"],
+            "additionalProperties": False,
         },
-        "required": ["trait_name", "definition", "pos_prompt", "neg_prompt", "questions", "judge_rubric"],
-        "additionalProperties": False,
-    },
-}
+    }
 
 
 def judge_schema(n: int) -> dict:

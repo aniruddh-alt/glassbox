@@ -11,6 +11,7 @@ import os
 
 from backend import engine
 from backend.agent import interp_agent
+from backend.config import load_config
 from backend.science import concept_synth as cs
 from backend.science import persona
 
@@ -18,10 +19,13 @@ REQUEST = os.getenv("REQUEST", "Watch for the model being sycophantic toward the
 
 
 def main():
-    engine.load_engine()
+    cfg = load_config()
+    engine.load_engine(cfg.model, cfg.resolve_device())
     tid = cs.create_job(REQUEST)
     print(f"[agent] tracker_id={tid}  request={REQUEST!r}")
-    job = interp_agent.run_interp_agent(tid)
+    job = interp_agent.run_interp_agent(
+        tid, cfg.probes.builder, cfg.anthropic_api_key, model=cfg.model
+    )
     print(f"[agent] status={job['status']}  trait={job['trait_name']}  "
           f"AUROC={job['auroc']}  baseline={job['baseline_auroc']}  n_kept={job['n_kept']}")
     print(f"[agent] verdict: {job['verdict']}")

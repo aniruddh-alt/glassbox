@@ -2,40 +2,43 @@
 them against a per-job context dict and keeps the job record in sync."""
 from __future__ import annotations
 
-from .. import config
 from ..science import concept_synth as cs
 from ..science import persona
 from . import prompts
 
-TOOLS = [
-    prompts.SPEC_TOOL,
-    {"name": "generate_contrastive", "description": "Run the model under the pos/neg prompts; capture activations.",
-     "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    {"name": "judge_filter", "description": "Keep only responses whose behavior matched the intended side.",
-     "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    {"name": "fit_and_validate", "description": "Train the probe; measure held-out AUROC vs a baseline.",
-     "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    {"name": "finalize", "description": "Record the plain-language pipeline summary; deployment is decided by the AUROC gate.",
-     "input_schema": {"type": "object", "properties": {"verdict": {"type": "string"}},
-                      "required": ["verdict"], "additionalProperties": False}},
-]
+
+def tools_for(builder) -> list[dict]:
+    """Build the tool list for a Claude call. `builder` is a ProbeBuilderConfig; the
+    submit_spec schema embeds builder.agent_max_questions."""
+    return [
+        prompts.spec_tool(builder),
+        {"name": "generate_contrastive", "description": "Run the model under the pos/neg prompts; capture activations.",
+         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
+        {"name": "judge_filter", "description": "Keep only responses whose behavior matched the intended side.",
+         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
+        {"name": "fit_and_validate", "description": "Train the probe; measure held-out AUROC vs a baseline.",
+         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
+        {"name": "finalize", "description": "Record the plain-language pipeline summary; deployment is decided by the AUROC gate.",
+         "input_schema": {"type": "object", "properties": {"verdict": {"type": "string"}},
+                          "required": ["verdict"], "additionalProperties": False}},
+    ]
 
 
-def dispatch(name: str, tool_input: dict, ctx: dict) -> str:
+def dispatch(name: str, tool_input: dict, ctx: dict, builder, model) -> str:
     tid = ctx["tracker_id"]
     try:
-        return _dispatch(name, tool_input, ctx)
+        return _dispatch(name, tool_input, ctx, builder, model)
     except Exception as e:  # noqa: BLE001 - surface in job record + agent tool_result
         msg = str(e) or type(e).__name__
         cs.update_job(tid, status="error", error=f"{name}: {msg}")
         return f"ERROR: {msg}"
 
 
-def _dispatch(name: str, tool_input: dict, ctx: dict) -> str:
+def _dispatch(name: str, tool_input: dict, ctx: dict, builder, model) -> str:
     tid = ctx["tracker_id"]
     if name == "submit_spec":
         ctx["spec"] = tool_input
-        cap = config.AGENT_MAX_QUESTIONS
+        cap = builder.agent_max_questions
         if cap:
             ctx["spec"]["questions"] = ctx["spec"]["questions"][:cap]
         cs.update_job(tid, status="designing", trait_name=tool_input["trait_name"],
@@ -54,7 +57,9 @@ def _dispatch(name: str, tool_input: dict, ctx: dict) -> str:
         return f"Generated {len(ctx['rows'])} responses. Call judge_filter."
     if name == "judge_filter":
         cs.update_job(tid, status="judging", progress={"step": "judging", "pct": 60})
-        ctx["rows"] = cs.judge_filter(ctx["spec"], ctx["rows"], client=ctx["client"])
+        ctx["rows"] = cs.judge_filter(
+            ctx["spec"], ctx["rows"], builder, ctx["anthropic_api_key"], client=ctx["client"]
+        )
         cs.update_job(tid, n_kept=len(ctx["rows"]))
         if not ctx["rows"]:
             return "Kept 0 clean rows after judge — call finalize explaining insufficient contrast."
@@ -67,16 +72,16 @@ def _dispatch(name: str, tool_input: dict, ctx: dict) -> str:
         if f["status"] != "ok":
             return "insufficient_data: too few clean rows or a class collapsed. Call finalize explaining this."
         return (f"held-out AUROC={f['auroc']:.2f} (baseline {f['baseline_auroc']:.2f}), "
-                f"tau={config.TRACK_AUROC_TAU}. Call finalize with your verdict.")
+                f"tau={builder.auroc_threshold}. Call finalize with your verdict.")
     if name == "finalize":
-        return _finalize(ctx, tool_input["verdict"])
+        return _finalize(ctx, tool_input["verdict"], builder, model)
     return f"unknown tool: {name}"
 
 
-def _finalize(ctx: dict, verdict: str) -> str:
+def _finalize(ctx: dict, verdict: str, builder, model) -> str:
     tid = ctx["tracker_id"]
     fit = ctx.get("fit") or {}
-    deployed = fit.get("status") == "ok" and (fit.get("auroc") or 0.0) >= config.TRACK_AUROC_TAU
+    deployed = fit.get("status") == "ok" and (fit.get("auroc") or 0.0) >= builder.auroc_threshold
     if deployed:
         persona._trackers[tid] = {
             "dir": fit["direction"],
@@ -86,7 +91,7 @@ def _finalize(ctx: dict, verdict: str) -> str:
                      "request": ctx["request"], "reliability": "synthetic-validated"},
         }
         try:
-            _persist_artifact(ctx, fit)
+            _persist_artifact(ctx, fit, model)
         except Exception as e:  # noqa: BLE001
             print(f"[agent] artifact persist failed for {tid}: {e}")
     cs.update_job(tid, status="ready" if deployed else "rejected", verdict=verdict,
@@ -94,7 +99,7 @@ def _finalize(ctx: dict, verdict: str) -> str:
     return "deployed as a live guardrail." if deployed else "not deployed (gate not met)."
 
 
-def _persist_artifact(ctx: dict, fit: dict) -> None:
+def _persist_artifact(ctx: dict, fit: dict, model) -> None:
     """Serialize a deployed probe to backend/science/artifacts/<id>.json."""
     import json
 
@@ -112,7 +117,7 @@ def _persist_artifact(ctx: dict, fit: dict) -> None:
         "projection_scale": scale,
         "alert_direction": "high",
         "direction_method": "diff_of_means",
-        "layer": config.LAYER,
+        "layer": model.layer,
         "auroc": fit.get("auroc"),
         "user_defined": True,
     }
