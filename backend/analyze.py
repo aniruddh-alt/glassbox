@@ -47,7 +47,7 @@ def _last_user(messages: list[dict]) -> str:
     return ""
 
 
-def _rank_features(candidates: list[dict], feature_cloud, cfg=None) -> list[dict]:
+def _rank_features(candidates: list[dict], feature_cloud, cfg) -> list[dict]:
     """Attach labels to candidate features and truncate to TOPK_EVENT.
 
     Two paths. When candidates carry `attr` (attribution ranking, the default) they are scored by

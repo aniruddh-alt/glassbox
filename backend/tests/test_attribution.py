@@ -5,7 +5,7 @@ so the formula act_{f,p} · (grad_p · W_dec[f]) is checked exactly, with no mod
 import torch
 
 from backend import analyze
-from backend.config import FeatureCloudConfig, ModelConfig, SAEConfig
+from backend.config import AppConfig, FeatureCloudConfig, ModelConfig, SAEConfig
 from backend.science import feature_provider as fp
 from backend.science import sae as sae_mod
 
@@ -105,14 +105,14 @@ def test_attribution_topk_contrastive_baseline_cancels_always_on(monkeypatch):
 def test_rank_features_uses_attribution_when_present(monkeypatch):
     monkeypatch.setattr(
         analyze.labels, "get_feature_stats",
-        lambda i, **k: {"label": f"label-{i}", "max_act": 1.0, "density": 0.001},
+        lambda i, *a, **k: {"label": f"label-{i}", "max_act": 1.0, "density": 0.001},
     )
     candidates = [
         {"index": 1, "act": 5.0, "attr": 0.2, "source": "s"},
         {"index": 2, "act": 9.0, "attr": 0.9, "source": "s"},
         {"index": 3, "act": 1.0, "attr": 0.5, "source": "s"},
     ]
-    ranked = analyze._rank_features(candidates, FeatureCloudConfig())
+    ranked = analyze._rank_features(candidates, FeatureCloudConfig(), AppConfig())
     assert [f["index"] for f in ranked] == [2, 3, 1]   # by attribution, NOT activation
     assert ranked[0]["label"] == "label-2"
     assert ranked[0]["caveat"] and ranked[0]["tracked"] is None
@@ -126,12 +126,12 @@ def test_rank_features_attribution_keeps_unlabeled_after_labeled(monkeypatch):
         1: {"label": "pregnancy", "max_act": 1.0, "density": 0.001},
         2: {"label": "feature 2", "max_act": None, "density": None},  # unlabeled
     }
-    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, **k: stats[i])
+    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, *a, **k: stats[i])
     candidates = [
         {"index": 1, "act": 5.0, "attr": 0.3, "source": "s"},
         {"index": 2, "act": 5.0, "attr": 0.8, "source": "s"},  # unlabeled but highest attribution
     ]
-    ranked = analyze._rank_features(candidates, FeatureCloudConfig())
+    ranked = analyze._rank_features(candidates, FeatureCloudConfig(), AppConfig())
     assert [f["index"] for f in ranked] == [1, 2]
 
 
@@ -140,13 +140,13 @@ def test_rank_features_attribution_prefers_explainable_labels(monkeypatch):
         1: {"label": "pregnancy", "max_act": 1.0, "density": 0.001},
         2: {"label": "feature 2", "max_act": None, "density": None},
     }
-    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, **k: stats[i])
+    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, *a, **k: stats[i])
     candidates = [
         {"index": 2, "act": 5.0, "attr": 0.8, "source": "s"},
         {"index": 1, "act": 5.0, "attr": 0.3, "source": "s"},
     ]
 
-    ranked = analyze._rank_features(candidates, FeatureCloudConfig(drop_unlabeled=True))
+    ranked = analyze._rank_features(candidates, FeatureCloudConfig(drop_unlabeled=True), AppConfig())
 
     assert [f["index"] for f in ranked] == [1, 2]
 
@@ -158,7 +158,7 @@ def test_rank_features_attribution_prefers_semantic_labels(monkeypatch):
         3: {"label": "cancer, tumor, oncology", "max_act": 1.0, "density": 0.001, "is_structural": False},
         469: {"label": "feature 469", "max_act": None, "density": None, "is_structural": False},
     }
-    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, **k: stats[i])
+    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, *a, **k: stats[i])
     candidates = [
         {"index": 1, "act": 5.0, "attr": 5.0, "source": "s"},
         {"index": 2, "act": 5.0, "attr": 4.0, "source": "s"},
@@ -166,7 +166,7 @@ def test_rank_features_attribution_prefers_semantic_labels(monkeypatch):
         {"index": 3, "act": 5.0, "attr": 0.2, "source": "s"},
     ]
 
-    ranked = analyze._rank_features(candidates, FeatureCloudConfig(drop_unlabeled=True))
+    ranked = analyze._rank_features(candidates, FeatureCloudConfig(drop_unlabeled=True), AppConfig())
 
     assert ranked[0]["label"] == "cancer, tumor, oncology"
 
@@ -176,13 +176,13 @@ def test_attribution_demotes_structural_below_concept(monkeypatch):
         1: {"label": "paragraph breaks", "max_act": 1.0, "density": 0.1, "is_structural": True},
         2: {"label": "pregnancy and childbirth", "max_act": 1.0, "density": 0.001, "is_structural": False},
     }
-    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, **k: stats[i])
+    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, *a, **k: stats[i])
     # structural feature has HIGHER raw attribution but must sink below the concept after the penalty
     candidates = [
         {"index": 1, "act": 5.0, "attr": 1.0, "source": "s"},  # 1.0 * 0.15 = 0.15
         {"index": 2, "act": 5.0, "attr": 0.5, "source": "s"},  # 0.5 * 1.0  = 0.5
     ]
-    ranked = analyze._rank_features(candidates, FeatureCloudConfig(structural_penalty=0.15))
+    ranked = analyze._rank_features(candidates, FeatureCloudConfig(structural_penalty=0.15), AppConfig())
     assert [f["index"] for f in ranked] == [2, 1]
 
 
@@ -192,12 +192,12 @@ def test_attribution_structural_survives_below_semantic(monkeypatch):
         1: {"label": "paragraph breaks", "max_act": 1.0, "density": 0.1, "is_structural": True},
         2: {"label": "pregnancy", "max_act": 1.0, "density": 0.001, "is_structural": False},
     }
-    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, **k: stats[i])
+    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, *a, **k: stats[i])
     candidates = [
         {"index": 1, "act": 5.0, "attr": 100.0, "source": "s"},  # 100 * 0.15 = 15 > 0.5
         {"index": 2, "act": 5.0, "attr": 0.5, "source": "s"},
     ]
-    ranked = analyze._rank_features(candidates, FeatureCloudConfig(structural_penalty=0.15))
+    ranked = analyze._rank_features(candidates, FeatureCloudConfig(structural_penalty=0.15), AppConfig())
     assert [f["index"] for f in ranked] == [2, 1]
     assert len(ranked) == 2  # nothing dropped
 
@@ -208,22 +208,22 @@ def test_attribution_structural_detected_via_label_marker(monkeypatch):
         1: {"label": "newline / paragraph break token", "max_act": 1.0, "density": 0.1},
         2: {"label": "pregnancy", "max_act": 1.0, "density": 0.001},
     }
-    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, **k: stats[i])
+    monkeypatch.setattr(analyze.labels, "get_feature_stats", lambda i, *a, **k: stats[i])
     candidates = [
         {"index": 1, "act": 5.0, "attr": 1.0, "source": "s"},
         {"index": 2, "act": 5.0, "attr": 0.5, "source": "s"},
     ]
-    ranked = analyze._rank_features(candidates, FeatureCloudConfig(structural_penalty=0.1))
+    ranked = analyze._rank_features(candidates, FeatureCloudConfig(structural_penalty=0.1), AppConfig())
     assert [f["index"] for f in ranked] == [2, 1]  # "newline"/"paragraph" marker -> demoted
 
 
 def test_rank_features_attribution_truncates_to_topk_event(monkeypatch):
     monkeypatch.setattr(
-        analyze.labels, "get_feature_stats", lambda i, **k: {"label": f"l{i}", "max_act": 1.0, "density": 0.01}
+        analyze.labels, "get_feature_stats", lambda i, *a, **k: {"label": f"l{i}", "max_act": 1.0, "density": 0.01}
     )
     candidates = [{"index": i, "act": 1.0, "attr": float(i), "source": "s"} for i in range(80)]
     fc = FeatureCloudConfig()
-    ranked = analyze._rank_features(candidates, fc)
+    ranked = analyze._rank_features(candidates, fc, AppConfig())
     assert len(ranked) == fc.topk_event
     assert ranked[0]["index"] == 79   # highest attribution first
 
