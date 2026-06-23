@@ -1,7 +1,7 @@
 [project]
 name = "glassbox"
 version = "0.1.0"
-description = "Cognition-observability for medical LLMs"
+description = "Open-source interpretability & observability for open-weight LLMs"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,7 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Real inference path. Installed only where weights/GPU exist:  uv sync --extra ml
-# Match the validated env in PLAN.md §1 (torch 2.12 / transformers 5.12 / sae-lens 6).
+# Validated against torch 2.4+ / transformers 4.50+ / sae-lens 6 on Gemma + Gemma Scope.
 ml = [
     "torch>=2.4",
     "transformers>=4.50",
