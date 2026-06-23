@@ -1585,7 +1585,8 @@ def test_scrub_pii_walks_whole_event_not_just_three_sections():
 
     ev = {"a": {"user_msg": "secret"}, "b": [{"response": "more"}]}
     _scrub_pii(ev, {}, send_io=False)
-    assert "secret" not in str(ev) or True  # redaction policy applied without raising
+    assert "secret" not in str(ev)
+    assert "more" not in str(ev)
 ```
 
 - [ ] Step 3: Run and confirm failure:
@@ -1990,7 +1991,7 @@ def test_real_turn_uses_pod_client_and_ranks(monkeypatch):
     monkeypatch.setattr(
         analyze.labels,
         "get_feature_stats",
-        lambda i, **k: {"label": f"label-{i}", "max_act": 1.0, "density": 0.001},
+        lambda i, sae, fc, key, *, np_source=None, **k: {"label": f"label-{i}", "max_act": 1.0, "density": 0.001},
     )
 
     def fake_turn(messages, pod, pod_token, *, max_new=None):
@@ -2037,7 +2038,7 @@ def test_analyze_turn_returns_perf(monkeypatch):
     monkeypatch.setattr(
         analyze.labels,
         "get_feature_stats",
-        lambda i, **k: {"label": f"label-{i}", "max_act": 1.0, "density": 0.001},
+        lambda i, sae, fc, key, *, np_source=None, **k: {"label": f"label-{i}", "max_act": 1.0, "density": 0.001},
     )
 
     def fake_turn_with_timings(messages, pod, pod_token, *, max_new=None):
@@ -2091,7 +2092,11 @@ Expected: `TypeError: _rank_features() takes 1 positional argument but 2 were gi
 
 - [ ] Step 4: Edit `backend/analyze.py`:
   - Change `analyze_turn(messages, *, message_id=None, ts=None, strict=False)` → `analyze_turn(messages, cfg, *, message_id=None, ts=None, strict=False)`. Keep the keyword-only block VERBATIM — only insert `cfg` as the 2nd positional. Do not touch the `message_id`/`ts`/`strict` handling.
-  - Change `_rank_features(candidates)` → `_rank_features(candidates, feature_cloud)`; replace `config.STRUCTURAL_PENALTY`→`feature_cloud.structural_penalty`, `config.DROP_UNLABELED`→`feature_cloud.drop_unlabeled`, `config.TOPK_EVENT`→`feature_cloud.topk_event`, `config.DENSITY_MAX`→`feature_cloud.density_max`, `config.SYNTACTIC_PENALTY`→`feature_cloud.syntactic_penalty`. (`labels.get_feature_stats(...)` is unchanged — it is migrated in Task 10.)
+  - Change `_rank_features(candidates)` → `_rank_features(candidates, feature_cloud)`; replace `config.STRUCTURAL_PENALTY`→`feature_cloud.structural_penalty`, `config.DROP_UNLABELED`→`feature_cloud.drop_unlabeled`, `config.TOPK_EVENT`→`feature_cloud.topk_event`, `config.DENSITY_MAX`→`feature_cloud.density_max`, `config.SYNTACTIC_PENALTY`→`feature_cloud.syntactic_penalty`. Update BOTH `labels.get_feature_stats` call sites inside `_rank_features` (the function that enriches each ranked feature with its label/stats): change every call from `labels.get_feature_stats(f["index"])` to the fully-threaded form:
+```python
+labels.get_feature_stats(f["index"], cfg.sae, cfg.feature_cloud, cfg.anthropic_api_key, np_source=cfg.np_source())
+```
+(The `cfg` object must be accessible inside `_rank_features` — either add it as a parameter `_rank_features(candidates, feature_cloud, cfg)` or, if the existing body already closes over `cfg` from the enclosing `_real_turn`/`analyze_turn` scope, ensure it does so explicitly. Both call sites in `_rank_features` must be updated; leaving either one as `labels.get_feature_stats(f["index"])` will raise a `TypeError` at runtime because Task 10 migrates `get_feature_stats` to require `(index, sae, feature_cloud, anthropic_api_key, *, np_source, timeout=6.0)`.)
   - Change `_real_turn(messages)` → `_real_turn(messages, cfg)`; inside it replace `pod_client.turn(messages, max_new=config.MAX_NEW_TOKENS)` → `pod_client.turn(messages, cfg.pod, cfg.pod_token, max_new=cfg.model.max_new_tokens)` and `_rank_features(r["candidates"])` → `_rank_features(r["candidates"], cfg.feature_cloud)`.
   - In `analyze_turn`: call `_real_turn(messages, cfg)`; in the pod-failure `except` block change `runtime.refresh_pod_health()` → `runtime.refresh_pod_health(cfg)`; change BOTH fallback calls `fallback.synth_turn(messages)` → `fallback.synth_turn(messages, cfg.sae, np_source=cfg.np_source())` (the real-path `except` branch AND the `else` non-real branch); change `build_cognition_event(..., model=config.MODEL_ID, layer=config.LAYER)` → `build_cognition_event(..., model=cfg.model.model_id, layer=cfg.model.layer)`.
   - Drop `from . import config` (the module no longer references any flat global once the above are threaded; keep `labels`/`runtime` imports and the lazy `pod_client`/`fanout`/`fallback` imports).
@@ -2518,11 +2523,12 @@ $ uv run python -c "import sys; import backend.app; assert 'torch' not in sys.mo
 ```
 Expected: `OK: app.py torch-free`.
 
-- [ ] Step 5: Commit:
+- [ ] Step 5: Commit (stage only the straggler files found and fixed in Steps 1–2; never `git add -A` to avoid sweeping in watch-*.json / probe_jobs/ / .env):
 ```
-$ git add -A
+$ git add $(git diff --name-only HEAD -- '*.py')
 $ git commit -m "refactor(config): migrate remaining config consumers to AppConfig; full suite green"
 ```
+(If `git diff --name-only HEAD -- '*.py'` is empty — all stragglers were already committed by prior tasks — run `git status --short` to confirm nothing is outstanding and skip the commit.)
 
 ---
 
@@ -2572,11 +2578,11 @@ $ uv run pytest -q
 ```
 Expected: all pass.
 
-- [ ] Step 5: Commit (the `.superpowers/` deletion is untracked so it does not appear in the commit; this commit captures the three tracked-cruft removals):
+- [ ] Step 5: Commit (the `.superpowers/` deletion is untracked so it does not appear in the commit; this commit captures only the three tracked-cruft removals already staged by `git rm` in Step 2; do NOT use `git add -A` which would sweep in untracked watch-*.json / probe_jobs/ / .env):
 ```
-$ git add -A
 $ git commit -m "chore: remove tracked cruft (main.py stub, empty err.txt, batch_medqa_results.json)"
 ```
+(The three deletions were staged by `git rm main.py err.txt batch_medqa_results.json` in Step 2; no additional `git add` is needed.)
 
 ---
 
@@ -2672,11 +2678,12 @@ $ uv sync && uv run pytest -q
 ```
 Expected: resolves cleanly; all tests pass.
 
-- [ ] Step 5: Commit:
+- [ ] Step 5: Commit (stage only the two changed items — the modified `pyproject.toml` and the deletion already staged by `git rm` in Step 2; do NOT use `git add -A` which would sweep in untracked artifacts):
 ```
-$ git add -A
+$ git add pyproject.toml
 $ git commit -m "chore(deps): retire backend/requirements.txt; pyproject is canonical; neutralize package description"
 ```
+(`backend/requirements.txt` was already staged as a deletion by `git rm` in Step 2; `git add pyproject.toml` stages the description/comment edits from Step 1.)
 
 ---
 
@@ -2711,9 +2718,8 @@ $ git ls-files frontend/bun.lock frontend/package-lock.json
 ```
 Expected: prints only `frontend/package-lock.json` (no `frontend/bun.lock`).
 
-- [ ] Step 4: Commit:
+- [ ] Step 4: Commit (`frontend/bun.lock` was already staged as a deletion by `git rm` in Step 2; do NOT use `git add -A` which would sweep in untracked artifacts):
 ```
-$ git add -A
 $ git commit -m "chore(frontend): standardize on npm package-lock.json; drop bun.lock"
 ```
 
