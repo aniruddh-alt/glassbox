@@ -65,7 +65,7 @@ def test_replay_sentry_endpoint(monkeypatch):
         },
         None,
     )
-    monkeypatch.setattr("backend.app.sentry_enabled", lambda: True)
+    monkeypatch.setattr("backend.app.sentry_enabled", lambda dsn: True)
     captured = {}
 
     def _capture(ev, obs=None, *, flush=False):
@@ -84,11 +84,11 @@ def test_test_sentry_endpoint(monkeypatch):
 
     from backend.app import app
 
-    monkeypatch.setattr("backend.app.sentry_enabled", lambda: False)
+    monkeypatch.setattr("backend.app.sentry_enabled", lambda dsn: False)
     r = TestClient(app).post("/api/observability/test-sentry")
     assert r.status_code == 503
 
-    monkeypatch.setattr("backend.app.sentry_enabled", lambda: True)
+    monkeypatch.setattr("backend.app.sentry_enabled", lambda dsn: True)
     monkeypatch.setattr("backend.app.capture_cognition_alarm", lambda ev, obs=None, *, flush=False: True)
     r = TestClient(app).post("/api/observability/test-sentry")
     assert r.status_code == 200
