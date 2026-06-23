@@ -128,7 +128,7 @@ def clear_trackers() -> None:
 
 
 def clear_custom_trackers(
-    artifact_dir: str | Path = ARTIFACT_DIR,
+    probes=None,
     *,
     keep: Iterable[str] | None = None,
     preserve_artifacts: Iterable[str] | None = None,
@@ -137,11 +137,21 @@ def clear_custom_trackers(
 
     Built-ins and deprecated training artifacts (``preserve_artifacts``) stay on disk but only
     ``keep`` ids remain registered in memory.
-    """
-    from .. import config
 
-    keep_set = set(keep if keep is not None else config.ENABLED_TRACKERS)
-    preserve = set(preserve_artifacts if preserve_artifacts is not None else config.DISABLED_TRACKERS)
+    probes: ProbeConfig providing artifacts_dir, enabled, and disabled defaults.
+    keep: override for which tracker ids to keep in memory (defaults to probes.enabled).
+    preserve_artifacts: override for which artifact files to preserve on disk (defaults to probes.disabled).
+    """
+    if probes is not None:
+        keep_set = set(keep if keep is not None else probes.enabled)
+        preserve = set(preserve_artifacts if preserve_artifacts is not None else probes.disabled)
+        artifact_dir = probes.artifacts_dir
+    else:
+        # Legacy path: no config object, use module-level defaults
+        keep_set = set(keep or [])
+        preserve = set(preserve_artifacts or [])
+        artifact_dir = ARTIFACT_DIR
+
     removed: list[str] = []
     for tid in list(_trackers.keys()):
         if tid not in keep_set:
@@ -195,20 +205,23 @@ def load_tracker_artifact(path: str | Path) -> str | None:
     return str(tid)
 
 
-def load_artifacts(
-    artifact_dir: str | Path = ARTIFACT_DIR,
-    exclude: Iterable[str] = (),
-    include: Iterable[str] | None = None,
-) -> list[str]:
+def load_artifacts(probes=None, include: Iterable[str] | None = None) -> list[str]:
     """Load ready tracker artifacts from a directory.
 
-    `include` — when set, only these ids (filename stems) are loaded.
-    `exclude` — skip these ids even if they would otherwise match `include`.
+    probes: ProbeConfig providing artifacts_dir and disabled (skip list).
+    include: when set, only these ids (filename stems) are loaded.
+
+    If probes is None, falls back to ARTIFACT_DIR with no exclusions (legacy path).
     """
-    root = Path(artifact_dir)
+    if probes is not None:
+        root = Path(probes.artifacts_dir)
+        skip = set(probes.disabled)
+    else:
+        root = ARTIFACT_DIR
+        skip = set()
+
     if not root.exists():
         return []
-    skip = set(exclude)
     allow = set(include) if include is not None else None
     loaded: list[str] = []
     for path in sorted(root.glob("*.json")):
