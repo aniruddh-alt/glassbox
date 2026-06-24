@@ -4,8 +4,6 @@ from __future__ import annotations
 
 
 def system_prompt(builder) -> str:
-    """Render the agent system prompt. `builder` is a ProbeBuilderConfig; its
-    `agent_max_questions` caps the contrastive question count."""
     max_q = builder.agent_max_questions
     return f"""You are an interpretability researcher replicating the Persona Vectors method.
 Given a natural-language request to monitor a behavior in a language model, you:
@@ -25,8 +23,6 @@ Call exactly one tool per step, in order. Do not skip steps."""
 
 
 def spec_tool(builder) -> dict:
-    """Render the submit_spec tool schema. `builder` is a ProbeBuilderConfig; its
-    `agent_max_questions` caps the contrastive question count."""
     max_q = builder.agent_max_questions
     return {
         "name": "submit_spec",

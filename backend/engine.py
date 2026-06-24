@@ -36,9 +36,7 @@ def _find_decoder_layers(model):
 
 
 def _resolve_device(model_cfg: ModelConfig) -> str:
-    """Inline device resolution for when no AppConfig is available (direct GPU callers).
-    Mirrors AppConfig.resolve_device — if device is explicitly 'cpu' return 'cpu',
-    otherwise prefer cuda > mps > cpu."""
+    """Prefer cuda > mps > cpu; respects model_cfg.device when explicit."""
     import torch
 
     p = (model_cfg.device or "auto").lower()
@@ -213,7 +211,7 @@ def generate_and_capture(
 
 
 def _encode_legacy(messages: list[dict], dev) -> dict:
-    """Legacy encode without model config — no system prompt injection."""
+    """Encode without model config — no system prompt injection."""
     enc = _tok.apply_chat_template(
         messages, add_generation_prompt=True, return_tensors="pt", return_dict=True
     )

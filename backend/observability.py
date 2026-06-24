@@ -14,6 +14,7 @@ def _observable_trackers(trackers: dict | None) -> dict:
     """Drop deprecated artifacts; keep enabled builtins and deployed custom probes."""
     return {tid: tr for tid, tr in (trackers or {}).items() if tid not in _DISABLED_TRACKERS}
 
+
 def to_redacted_view(event: dict) -> dict:
     """ALLOW-LIST projection → de-identified view. io.* and adjudication.rationale are never copied,
     so prompt/response cannot leak structurally."""

@@ -11,7 +11,7 @@ _sae = None  # set by load_sae()
 
 
 def _resolve_device_inline() -> str:
-    """Resolve device for load_sae when no AppConfig is available (direct GPU callers)."""
+    """Prefer cuda > mps > cpu."""
     import torch
 
     if torch.cuda.is_available():
@@ -22,12 +22,7 @@ def _resolve_device_inline() -> str:
 
 
 def load_sae(sae: SAEConfig, layer: int, device: str | None = None):
-    """Load the Gemma Scope SAE for `layer` onto the resolved device.
-
-    sae: SAEConfig with release and sae_id_pattern.
-    layer: the residual layer index to load.
-    device: explicit device string; if None, resolved via torch availability.
-    """
+    """Load the Gemma Scope SAE for `layer` onto the resolved device."""
     global _sae
     from sae_lens import SAE
 
@@ -60,13 +55,7 @@ def sae_topk(act, sae: SAEConfig, feature_cloud: FeatureCloudConfig, *, np_sourc
     """act: layer-LAYER resid_post activation tensor [d_in=2560] (one token).
     Returns up to k {index, act, source} dicts (labels attached later by labels.py).
     Mask special tokens upstream — their activations are high-norm noise.
-    Used by the legacy raw-activation ranking path; attribution_topk is preferred.
-
-    sae: SAEConfig (provides metadata, not used for indexing here).
-    feature_cloud: FeatureCloudConfig (provides topk default).
-    np_source: Neuronpedia source slug for the source field (threaded from gpu_service via cfg.np_source(layer)).
-    k: override for topk; defaults to feature_cloud.topk.
-    """
+    Used by the legacy raw-activation ranking path; attribution_topk is preferred."""
     import torch
 
     if _sae is None:
@@ -137,10 +126,6 @@ def attribution_topk(
 
     acts/grad: [n_pos, d_in] response-position activations and dL/d(resid_post), ALIGNED.
     keep: positions in [0, n_pos) to include (special tokens already excluded by the caller).
-    sae: SAEConfig (metadata, not used for indexing here).
-    feature_cloud: FeatureCloudConfig (provides topk_candidates default).
-    np_source: Neuronpedia source slug for the source field.
-    cap: override for candidate pool size; defaults to feature_cloud.topk_candidates.
     Returns up to `cap` {index, act, attr, source} dicts, highest attribution first.
     """
     if _sae is None:
@@ -171,10 +156,7 @@ def attribution_topk(
 def reconstruction_error(act, sae: SAEConfig) -> dict:
     """Sanity check the layer/dtype are correct: a correctly-wired Gemma Scope SAE
     reconstructs its own training-layer activations with high cosine (~0.9+).
-    A low cosine usually means an off-by-one layer (hidden_states[0] is the embedding).
-
-    sae: SAEConfig (metadata, used for future validation checks).
-    """
+    A low cosine usually means an off-by-one layer (hidden_states[0] is the embedding)."""
     import torch
 
     a = _prep(act)

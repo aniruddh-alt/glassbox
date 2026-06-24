@@ -204,11 +204,7 @@ def _judge_batch(
 
 
 def judge_filter(spec: dict, rows: list[dict], builder, anthropic_api_key: str, *, client=None) -> list[dict]:
-    """Score each response 1-5; keep unambiguous positives (>=4) and negatives (<=2).
-
-    builder: ProbeBuilderConfig providing judge_model + judge_batch_size.
-    anthropic_api_key: Claude key; used only when `client` is not injected.
-    """
+    """Score each response 1-5; keep unambiguous positives (>=4) and negatives (<=2)."""
     if client is None:
         import anthropic
 

@@ -1,4 +1,3 @@
-# backend/tests/test_loop.py
 import torch
 
 from backend.agent import interp_agent

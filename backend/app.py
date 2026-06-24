@@ -32,14 +32,14 @@ async def lifespan(app: FastAPI):
     """
     from .config import load_config
 
-    app.state.config = load_config()  # product name lives in cfg.runtime.product_name
+    app.state.config = load_config()
     cfg = app.state.config
     runtime.start_loading(cfg)
     init_sponsors(cfg.observability, cfg.sentry_dsn)
     yield
 
 
-app = FastAPI(title="GlassBox", lifespan=lifespan)  # product name lives in cfg.runtime.product_name
+app = FastAPI(title="GlassBox", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )

@@ -9,7 +9,7 @@ from .sae import attribution_topk, sae_topk
 
 
 def _resolve_device_inline(device: str | None = None) -> str:
-    """Inline device resolution for get_provider when no AppConfig is available."""
+    """Prefer cuda > mps > cpu; returns `device` directly if given."""
     if device is not None:
         return device
     try:
@@ -47,8 +47,6 @@ class FeatureProvider:
         token_ids: per-position ids aligned to `activations`. special_ids: ids to skip.
         grad: per-position dL/d(resid_post) aligned to `activations`, enabling attribution
         ranking. baseline: optional [d_sae] neutral-prompt attribution to subtract (contrastive).
-        sae: SAEConfig for metadata/patterns. feature_cloud: FeatureCloudConfig for ranking knobs.
-        model: ModelConfig for preamble_skip etc. np_source: Neuronpedia source slug.
         Labels are attached downstream."""
         raise NotImplementedError
 
@@ -77,8 +75,6 @@ class LocalSAEProvider(FeatureProvider):
             raise ValueError(
                 "LocalSAEProvider needs captured activations [n_positions, d_in]"
             )
-        # Resolve config values with sub-config objects; fall back to hardcoded defaults
-        # for backward-compat callers that don't pass sub-configs.
         _fc = feature_cloud if feature_cloud is not None else FeatureCloudConfig()
         _model = model if model is not None else ModelConfig()
         _sae = sae if sae is not None else SAEConfig()
@@ -148,7 +144,6 @@ class NeuronpediaProvider(FeatureProvider):
             raise RuntimeError("remote feature POST forbidden for patient data")
         import httpx
 
-        # Resolve config values with sub-config objects; fall back to hardcoded defaults.
         _fc = feature_cloud if feature_cloud is not None else FeatureCloudConfig()
         _model = model if model is not None else ModelConfig()
         _sae = sae if sae is not None else SAEConfig()
@@ -188,9 +183,7 @@ class NeuronpediaProvider(FeatureProvider):
 
 def get_provider(prefer: str | None = None, *, device: str | None = None) -> FeatureProvider:
     """Pick the feature provider. 'auto' (default) = local when a GPU/MPS is present, else Neuronpedia.
-    Override with FEATURE_PROVIDER=local|neuronpedia.
-    device: resolved device string from the caller (e.g. cfg.resolve_device()); if None, resolved inline.
-    """
+    Override with FEATURE_PROVIDER=local|neuronpedia."""
     pref = (prefer or os.getenv("FEATURE_PROVIDER", "auto")).lower()
     if pref == "neuronpedia":
         return NeuronpediaProvider()

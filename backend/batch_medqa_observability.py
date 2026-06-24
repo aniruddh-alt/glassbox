@@ -104,9 +104,7 @@ def main() -> None:
     _ensure_real_mode()
     if not args.dry_run:
         init_sponsors(_cfg.observability, _cfg.sentry_dsn)
-        print(
-            f"[batch] sponsors: sentry={'on' if _cfg.sentry_dsn else 'off'} "
-        )
+        print(f"[batch] sponsors: sentry={'on' if _cfg.sentry_dsn else 'off'}")
 
     print(f"[batch] running {len(prompts)} prompts (mode={runtime.STATE['mode']})")
     results: list[dict] = []

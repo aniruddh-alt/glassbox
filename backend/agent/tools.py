@@ -8,8 +8,6 @@ from . import prompts
 
 
 def tools_for(builder) -> list[dict]:
-    """Build the tool list for a Claude call. `builder` is a ProbeBuilderConfig; the
-    submit_spec schema embeds builder.agent_max_questions."""
     return [
         prompts.spec_tool(builder),
         {"name": "generate_contrastive", "description": "Run the model under the pos/neg prompts; capture activations.",

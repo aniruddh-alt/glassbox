@@ -107,9 +107,6 @@ def test_analyze_turn_returns_perf(monkeypatch):
 
 
 def test_pod_failure_reports_instrument_unhealthy(monkeypatch):
-    """Regression: a pod failure must wire the instrument_unhealthy concern to Sentry via
-    fanout.report_error('pod-down', exc)."""
-    from backend import runtime
     import backend.pod_client as pc
     import backend.fanout as fo
 

@@ -1,7 +1,6 @@
-"""Tests for GET /api/observability (Task 13 / Task 15).
+"""Tests for GET /api/observability.
 
 Verifies the merged-shape contract from §7 of the design spec.
-Does NOT test POST /api/observability/eval (coherence_eval doesn't exist yet).
 """
 
 import pytest

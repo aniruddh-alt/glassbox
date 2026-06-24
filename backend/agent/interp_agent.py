@@ -18,13 +18,7 @@ def run_interp_agent(
     generate_fn=None,
     model: ModelConfig | None = None,
 ) -> dict | None:
-    """Run the Claude tool-use probe-builder loop for `tracker_id`.
-
-    builder: ProbeBuilderConfig (agent_model, judge knobs, auroc gate).
-    anthropic_api_key: Claude key; used only when `client` is not injected.
-    model: ModelConfig — its `layer` is recorded in the persisted artifact.
-        (Keyword-only, optional, WS3-authorized addition; defaults to ModelConfig().)
-    """
+    """Run the Claude tool-use probe-builder loop for `tracker_id`."""
     job = cs.get_job(tracker_id)
     if job is None:
         raise ValueError(f"unknown tracker_id: {tracker_id}")

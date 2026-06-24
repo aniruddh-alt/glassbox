@@ -92,7 +92,6 @@ def get_feature_stats(
     except Exception as e:
         from . import fanout
         fanout.report_error("label-fetch", e, {"feature_index": index})  # instrument_unhealthy → Sentry
-        pass
 
     is_structural = False
     resolved = label is not None

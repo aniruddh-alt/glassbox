@@ -1,8 +1,6 @@
 """WS0 AppConfig backbone — models, loader, secret exclusion."""
 from __future__ import annotations
 
-from pathlib import Path
-
 
 def test_submodels_have_gemma_defaults():
     from backend.config import ModelConfig, SAEConfig, FeatureCloudConfig, ProbeConfig

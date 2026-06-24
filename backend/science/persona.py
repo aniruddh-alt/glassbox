@@ -136,18 +136,12 @@ def clear_custom_trackers(
     """Unload non-builtin trackers and delete their on-disk artifact JSON files.
 
     Built-ins and deprecated training artifacts (``preserve_artifacts``) stay on disk but only
-    ``keep`` ids remain registered in memory.
-
-    probes: ProbeConfig providing artifacts_dir, enabled, and disabled defaults.
-    keep: override for which tracker ids to keep in memory (defaults to probes.enabled).
-    preserve_artifacts: override for which artifact files to preserve on disk (defaults to probes.disabled).
-    """
+    ``keep`` ids remain registered in memory."""
     if probes is not None:
         keep_set = set(keep if keep is not None else probes.enabled)
         preserve = set(preserve_artifacts if preserve_artifacts is not None else probes.disabled)
         artifact_dir = probes.artifacts_dir
     else:
-        # Legacy path: no config object, use module-level defaults
         keep_set = set(keep or [])
         preserve = set(preserve_artifacts or [])
         artifact_dir = ARTIFACT_DIR
@@ -208,11 +202,8 @@ def load_tracker_artifact(path: str | Path) -> str | None:
 def load_artifacts(probes=None, include: Iterable[str] | None = None) -> list[str]:
     """Load ready tracker artifacts from a directory.
 
-    probes: ProbeConfig providing artifacts_dir and disabled (skip list).
     include: when set, only these ids (filename stems) are loaded.
-
-    If probes is None, falls back to ARTIFACT_DIR with no exclusions (legacy path).
-    """
+    If probes is None, falls back to ARTIFACT_DIR with no exclusions (legacy path)."""
     if probes is not None:
         root = Path(probes.artifacts_dir)
         skip = set(probes.disabled)

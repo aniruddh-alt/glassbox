@@ -6,10 +6,6 @@ import backend.labels as labels
 from backend.config import AppConfig
 
 
-# --------------------------------------------------------------------------- #
-# Window builder tests (pure — no network)
-# --------------------------------------------------------------------------- #
-
 def test_highlighted_windows_wraps_peak_and_trims():
     acts = [{"tokens": ["a", "b", "PEAK", "c", "d"], "values": [0, 0, 5, 0, 0], "maxValueTokenIndex": 2}]
     assert labels._highlighted_windows(acts, n=15, radius=1) == ["b<<PEAK>>c"]
@@ -24,10 +20,6 @@ def test_highlighted_windows_skips_empty_and_caps_n():
     acts = [{"tokens": [], "values": []}, {"tokens": ["p"], "values": [1], "maxValueTokenIndex": 0}]
     assert labels._highlighted_windows(acts, n=1, radius=2) == []  # n=1 takes only the empty one
 
-
-# --------------------------------------------------------------------------- #
-# Helpers shared across get_feature_stats tests
-# --------------------------------------------------------------------------- #
 
 def _fake_resp(payload):
     class R:
@@ -50,10 +42,6 @@ def _default_cfg():
     cfg.anthropic_api_key = "sk-test"
     return cfg
 
-
-# --------------------------------------------------------------------------- #
-# get_feature_stats tests (updated for threaded signatures)
-# --------------------------------------------------------------------------- #
 
 def test_get_feature_stats_autointerps_when_unlabeled(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
@@ -147,10 +135,6 @@ def test_get_feature_stats_retries_unresolved_session_fallback(monkeypatch, tmp_
     assert labels.get_feature_stats(999, cfg.sae, cfg.feature_cloud, cfg.anthropic_api_key, np_source=cfg.np_source())["label"] == "pregnancy and childbirth"
     assert calls["n"] == 2
 
-
-# --------------------------------------------------------------------------- #
-# New tests: sub-config threading + neutral auto-interp prompt
-# --------------------------------------------------------------------------- #
 
 class _NPResp:
     """Neuronpedia response with NO explanation but WITH activating examples -> autointerp fires."""
