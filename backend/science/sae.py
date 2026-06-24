@@ -5,19 +5,31 @@ OWNER: Lane B. Load once at startup; sae_topk runs per token (one matmul, micros
 
 from __future__ import annotations
 
-from .. import config
+from ..config import SAEConfig, FeatureCloudConfig
 
 _sae = None  # set by load_sae()
 
 
-def load_sae(layer: int = config.LAYER, device: str | None = None):
-    """Load the Gemma Scope SAE for `layer` (defaults to LAYER=17) onto the resolved device."""
+def _resolve_device_inline() -> str:
+    """Prefer cuda > mps > cpu."""
+    import torch
+
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def load_sae(sae: SAEConfig, layer: int, device: str | None = None):
+    """Load the Gemma Scope SAE for `layer` onto the resolved device."""
     global _sae
     from sae_lens import SAE
 
-    dev = config.resolve_device(device)
+    dev = device if device is not None else _resolve_device_inline()
+    sae_id = sae.sae_id_pattern.format(layer=layer)
     loaded = SAE.from_pretrained(
-        release=config.SAE_RELEASE, sae_id=config.sae_id_for_layer(layer), device=dev
+        release=sae.release, sae_id=sae_id, device=dev
     )
     # SAELens has returned either an SAE or a (sae, cfg, sparsity) tuple across versions.
     _sae = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
@@ -39,22 +51,22 @@ def _prep(act):
     return act.detach().reshape(-1).float().to(dev)
 
 
-def sae_topk(act, k: int = config.TOPK) -> list[dict]:
+def sae_topk(act, sae: SAEConfig, feature_cloud: FeatureCloudConfig, *, np_source: str, k: int | None = None) -> list[dict]:
     """act: layer-LAYER resid_post activation tensor [d_in=2560] (one token).
     Returns up to k {index, act, source} dicts (labels attached later by labels.py).
     Mask special tokens upstream — their activations are high-norm noise.
-    Used by the legacy raw-activation ranking path; attribution_topk is preferred.
-    """
+    Used by the legacy raw-activation ranking path; attribution_topk is preferred."""
     import torch
 
     if _sae is None:
         raise RuntimeError("call load_sae() first")
+    k = k if k is not None else feature_cloud.topk
     a = _prep(act)
     with torch.no_grad():
         feats = _sae.encode(a.unsqueeze(0)).squeeze(0)  # [d_sae=16384]
     vals, idx = feats.topk(k)
     return [
-        {"index": int(i), "act": round(float(v), 3), "source": config.NP_SOURCE}
+        {"index": int(i), "act": round(float(v), 3), "source": np_source}
         for v, i in zip(vals.tolist(), idx.tolist())
         if v > 0
     ]
@@ -90,7 +102,15 @@ def feature_attribution(acts, grad, keep):
     return attr, act_max
 
 
-def attribution_topk(acts, grad, keep, cap: int = config.TOPK_CANDIDATES, baseline=None) -> list[dict]:
+def attribution_topk(
+    acts, grad, keep,
+    sae: SAEConfig,
+    feature_cloud: FeatureCloudConfig,
+    *,
+    np_source: str,
+    cap: int | None = None,
+    baseline=None,
+) -> list[dict]:
     """Rank features by causal effect on the response, not by raw activation.
 
     For each kept position p, feature f's attribution is act_{f,p} · (grad_p · W_dec[f]) — the
@@ -112,6 +132,7 @@ def attribution_topk(acts, grad, keep, cap: int = config.TOPK_CANDIDATES, baseli
         raise RuntimeError("call load_sae() first")
     if not keep:
         return []
+    cap = cap if cap is not None else feature_cloud.topk_candidates
     attr, act_max = feature_attribution(acts, grad, keep)
     if baseline is not None:
         attr = attr - baseline.to(attr.device)   # contrastive: cancel always-on features
@@ -126,13 +147,13 @@ def attribution_topk(acts, grad, keep, cap: int = config.TOPK_CANDIDATES, baseli
                 "index": int(i),
                 "act": round(float(act_max[i]), 3),
                 "attr": round(float(v), 4),
-                "source": config.NP_SOURCE,
+                "source": np_source,
             }
         )
     return out
 
 
-def reconstruction_error(act) -> dict:
+def reconstruction_error(act, sae: SAEConfig) -> dict:
     """Sanity check the layer/dtype are correct: a correctly-wired Gemma Scope SAE
     reconstructs its own training-layer activations with high cosine (~0.9+).
     A low cosine usually means an off-by-one layer (hidden_states[0] is the embedding)."""

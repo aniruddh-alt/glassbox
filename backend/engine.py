@@ -10,7 +10,7 @@ split, and the transformers-5.x bare-tensor layer output.
 
 from __future__ import annotations
 
-from . import config
+from .config import ModelConfig, SAEConfig
 
 _cap: dict = {"act": None}  # newest capture, written by the forward hook
 _grad_mode = False  # when True the hook keeps the live (graph-attached) tensor for attribution
@@ -35,8 +35,26 @@ def _find_decoder_layers(model):
     return max(lang or cands, key=lambda c: len(c[1]))
 
 
-def load_engine(device: str | None = None):
-    """Load the model (config.MODEL_ID), register ONE hook on the decoder layer config.LAYER."""
+def _resolve_device(model_cfg: ModelConfig) -> str:
+    """Prefer cuda > mps > cpu; respects model_cfg.device when explicit."""
+    import torch
+
+    p = (model_cfg.device or "auto").lower()
+    if p == "cuda" and torch.cuda.is_available():
+        return "cuda"
+    if p == "mps" and torch.backends.mps.is_available():
+        return "mps"
+    if p == "cpu":
+        return "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def load_engine(model: ModelConfig, device: str | None = None):
+    """Load the model (model.model_id), register ONE hook on the decoder layer model.layer."""
     global _tok, _model, _layers, _layers_path
     import torch
     from transformers import (
@@ -45,14 +63,14 @@ def load_engine(device: str | None = None):
         AutoTokenizer,
     )
 
-    dev = config.resolve_device(device)
+    dev = device if device is not None else _resolve_device(model)
     dtype = torch.float32 if dev == "cpu" else torch.bfloat16
-    _tok = AutoTokenizer.from_pretrained(config.MODEL_ID)
+    _tok = AutoTokenizer.from_pretrained(model.model_id)
     try:
-        _model = AutoModelForCausalLM.from_pretrained(config.MODEL_ID, dtype=dtype)
+        _model = AutoModelForCausalLM.from_pretrained(model.model_id, dtype=dtype)
     except Exception:
         _model = AutoModelForImageTextToText.from_pretrained(
-            config.MODEL_ID, dtype=dtype
+            model.model_id, dtype=dtype
         )
     _model = _model.to(dev).eval()
 
@@ -64,23 +82,23 @@ def load_engine(device: str | None = None):
         # otherwise store a detached copy (cheap, retains no autograd graph).
         _cap["act"] = hs if _grad_mode else hs.detach()
 
-    _layers[config.LAYER].register_forward_hook(hook)
+    _layers[model.layer].register_forward_hook(hook)
     return _tok, _model
 
 
-def _inject_system(messages: list[dict]) -> list[dict]:
-    """Prepend config.SYSTEM_PROMPT as a leading system turn, unless one is already present or
+def _inject_system(messages: list[dict], model: ModelConfig) -> list[dict]:
+    """Prepend model.system_prompt as a leading system turn, unless one is already present or
     the prompt is empty."""
-    sys = (config.SYSTEM_PROMPT or "").strip()
+    sys = (model.system_prompt or "").strip()
     if not sys or (messages and messages[0].get("role") == "system"):
         return messages
     return [{"role": "system", "content": sys}, *messages]
 
 
-def _merge_system_into_user(messages: list[dict]) -> list[dict]:
+def _merge_system_into_user(messages: list[dict], model: ModelConfig) -> list[dict]:
     """Fallback for chat templates that reject a system role (some Gemma builds): fold the
     system prompt into the first user turn so the model still receives it."""
-    sys = (config.SYSTEM_PROMPT or "").strip()
+    sys = (model.system_prompt or "").strip()
     if not sys:
         return messages
     out = [dict(m) for m in messages]
@@ -91,16 +109,16 @@ def _merge_system_into_user(messages: list[dict]) -> list[dict]:
     return [{"role": "user", "content": sys}, *out]
 
 
-def _encode(messages: list[dict], dev) -> dict:
+def _encode(messages: list[dict], dev, model: ModelConfig) -> dict:
     """Apply the chat template with the system prompt injected, then move to device. Falls back to
     merging the system text into the first user turn if the template has no system role."""
     try:
         enc = _tok.apply_chat_template(
-            _inject_system(messages), add_generation_prompt=True, return_tensors="pt", return_dict=True
+            _inject_system(messages, model), add_generation_prompt=True, return_tensors="pt", return_dict=True
         )
     except Exception:  # noqa: BLE001 — template rejects system role; merge into the first user turn
         enc = _tok.apply_chat_template(
-            _merge_system_into_user(messages), add_generation_prompt=True, return_tensors="pt", return_dict=True
+            _merge_system_into_user(messages, model), add_generation_prompt=True, return_tensors="pt", return_dict=True
         )
     return {k: v.to(dev) for k, v in enc.items()}
 
@@ -109,12 +127,12 @@ def get_layers():
     return _layers
 
 
-def info() -> dict:
+def info(model: ModelConfig, sae: SAEConfig) -> dict:
     return {
-        "model": config.MODEL_ID,
+        "model": model.model_id,
         "layers_path": _layers_path,
         "n_layers": (len(_layers) if _layers is not None else None),
-        "hook_layer": config.LAYER,
+        "hook_layer": model.layer,
     }
 
 
@@ -142,21 +160,26 @@ def _acts_for_sequence(out) -> "torch.Tensor":
 
 
 def generate_and_capture(
-    messages: list[dict], max_new: int = 48, *, attribution: bool | None = None
+    messages: list[dict], max_new: int = 48, *, attribution: bool | None = None,
+    model: ModelConfig | None = None, feature_cloud=None,
 ) -> dict:
     """Generate the answer, then capture LAYER resid_post for ALL response positions.
 
     Returns {answer, acts:[seq,d_in], grad:[seq,d_in]|None, out_ids, resp_start, tok}.
-    When attribution is on (default: config.RANK_METHOD == 'attribution'), a single grad-enabled
-    forward + one backward of a response-logit metric also yields grad = dL/d(resid_post), which
-    drives attribution ranking. Any failure (e.g. OOM) degrades to the plain no-grad capture."""
+    When attribution is on (default: feature_cloud.rank_method == 'attribution' if provided),
+    a single grad-enabled forward + one backward of a response-logit metric also yields
+    grad = dL/d(resid_post), which drives attribution ranking. Any failure (e.g. OOM) degrades
+    to the plain no-grad capture."""
     import torch
 
     if attribution is None:
-        attribution = config.RANK_METHOD == "attribution"
+        if feature_cloud is not None:
+            attribution = feature_cloud.rank_method == "attribution"
+        else:
+            attribution = True  # default to attribution when no config provided
 
     dev = next(_model.parameters()).device
-    enc = _encode(messages, dev)
+    enc = _encode(messages, dev, model) if model is not None else _encode_legacy(messages, dev)
     ids = enc["input_ids"]
     with torch.no_grad():
         out = _model.generate(
@@ -185,6 +208,14 @@ def generate_and_capture(
         "resp_start": resp_start,
         "tok": _tok,
     }
+
+
+def _encode_legacy(messages: list[dict], dev) -> dict:
+    """Encode without model config — no system prompt injection."""
+    enc = _tok.apply_chat_template(
+        messages, add_generation_prompt=True, return_tensors="pt", return_dict=True
+    )
+    return {k: v.to(dev) for k, v in enc.items()}
 
 
 def _capture_grad(out, resp_start: int):
@@ -216,7 +247,7 @@ def _capture_grad(out, resp_start: int):
     return g[0].detach()
 
 
-def probe_activation(text: str, pos: int | None = None):
+def probe_activation(text: str, model: ModelConfig, pos: int | None = None):
     """One no-grad forward over a probe prompt; return a single-position resid_post [d_in].
     Used by the startup reconstruction-error wiring check (runtime._run_recon_check)."""
     import torch

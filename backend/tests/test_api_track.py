@@ -7,7 +7,7 @@ from backend import pod_client
 def test_post_track_proxies_request_to_pod(monkeypatch):
     captured = {}
 
-    def fake_track(request):
+    def fake_track(request, pod, pod_token):
         captured["request"] = request
         return {"tracker_id": "watch-x-abc123", "status": "pending"}
 
@@ -24,7 +24,7 @@ def test_get_track_status_proxies_to_pod(monkeypatch):
     monkeypatch.setattr(
         pod_client,
         "track_status",
-        lambda tid: {"tracker_id": tid, "status": "ready", "auroc": 0.91, "verdict": "good"},
+        lambda tid, pod, pod_token: {"tracker_id": tid, "status": "ready", "auroc": 0.91, "verdict": "good"},
     )
     client = TestClient(app_module.app)
 

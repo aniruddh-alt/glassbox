@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 import uuid
 
-from . import config, labels, runtime
+from . import labels, runtime
 from .events import build_cognition_event
 from .schema import CognitionEvent
 
@@ -47,7 +47,7 @@ def _last_user(messages: list[dict]) -> str:
     return ""
 
 
-def _rank_features(candidates: list[dict]) -> list[dict]:
+def _rank_features(candidates: list[dict], feature_cloud, cfg) -> list[dict]:
     """Attach labels to candidate features and truncate to TOPK_EVENT.
 
     Two paths. When candidates carry `attr` (attribution ranking, the default) they are scored by
@@ -63,7 +63,7 @@ def _rank_features(candidates: list[dict]) -> list[dict]:
         return {
             "index": f["index"],
             "act": f["act"],
-            "source": f["source"],
+            "source": f.get("source"),
             "label": label,
             "caveat": DEFAULT_CAVEAT,
             "tracked": None,
@@ -71,6 +71,21 @@ def _rank_features(candidates: list[dict]) -> list[dict]:
 
     def _unlabeled(feat: dict) -> bool:
         return feat["label"] == f"feature {feat['index']}"
+
+    def _stats(f: dict) -> dict:
+        """Stats for a candidate. Pod candidates carry only index/act/attr/source, so labels
+        are resolved (Neuronpedia → auto-interp) via the threaded get_feature_stats. When a
+        candidate already carries its own label/stats they are used directly (no network)."""
+        if "label" in f:
+            return {
+                "label": f["label"],
+                "max_act": f.get("max_act"),
+                "density": f.get("density"),
+                "is_structural": f.get("is_structural", False),
+            }
+        return labels.get_feature_stats(
+            f["index"], cfg.sae, cfg.feature_cloud, cfg.anthropic_api_key, np_source=cfg.np_source()
+        )
 
     # Attribution path: candidates carry `attr` = causal effect on the response (act × grad·decoder).
     # Attach labels (auto-interp fills Neuronpedia's gaps) and DEMOTE structural features — punctuation,
@@ -80,56 +95,56 @@ def _rank_features(candidates: list[dict]) -> list[dict]:
     if any("attr" in c for c in candidates):
         scored: list[tuple[float, dict]] = []
         for f in candidates:
-            s = labels.get_feature_stats(f["index"])
+            s = _stats(f)
             structural = s.get("is_structural") or _is_syntactic(s["label"])
-            penalty = config.STRUCTURAL_PENALTY if structural else 1.0
+            penalty = feature_cloud.structural_penalty if structural else 1.0
             scored.append((f.get("attr", 0.0) * penalty, _feature(f, s["label"])))
         scored.sort(key=lambda t: -t[0])
-        if config.DROP_UNLABELED:
+        if feature_cloud.drop_unlabeled:
             semantic = [t for t in scored if not _unlabeled(t[1]) and not _is_syntactic(t[1]["label"])]
             structural = [t for t in scored if not _unlabeled(t[1]) and _is_syntactic(t[1]["label"])]
             if semantic:
                 scored = semantic + structural + [t for t in scored if _unlabeled(t[1])]
-        return [feat for _, feat in scored[: config.TOPK_EVENT]]
+        return [feat for _, feat in scored[: feature_cloud.topk_event]]
 
     scored: list[tuple[float, dict]] = []
     for f in candidates:
-        s = labels.get_feature_stats(f["index"])
+        s = _stats(f)
         # drop features Neuronpedia hasn't labelled ("feature N") — keeps the cloud legible
-        if config.DROP_UNLABELED and s["label"] == f"feature {f['index']}":
+        if feature_cloud.drop_unlabeled and s["label"] == f"feature {f['index']}":
             continue
         # drop generic/grammatical features: they fire on a large fraction of the corpus,
         # unlike specific (e.g. clinical) features which are rare
         d = s["density"]
-        if config.DENSITY_MAX < 1.0 and d is not None and d > config.DENSITY_MAX:
+        if feature_cloud.density_max < 1.0 and d is not None and d > feature_cloud.density_max:
             continue
         mx = s["max_act"]
         rel = (f["act"] / mx) if mx else 0.0
         # down-rank syntactic/surface features so abstract concepts outrank them
-        if config.SYNTACTIC_PENALTY < 1.0 and _is_syntactic(s["label"]):
-            rel *= config.SYNTACTIC_PENALTY
+        if feature_cloud.syntactic_penalty < 1.0 and _is_syntactic(s["label"]):
+            rel *= feature_cloud.syntactic_penalty
         scored.append((rel, _feature(f, s["label"])))
 
     if not scored:  # everything was unlabeled — show raw rather than an empty cloud
         return [
-            _feature(f, labels.get_feature_stats(f["index"])["label"])
-            for f in candidates[: config.TOPK_EVENT]
+            _feature(f, _stats(f)["label"])
+            for f in candidates[: feature_cloud.topk_event]
         ]
     scored.sort(key=lambda t: (-t[0], -t[1]["act"]))
-    return [feat for _, feat in scored[: config.TOPK_EVENT]]
+    return [feat for _, feat in scored[: feature_cloud.topk_event]]
 
 
-def _real_turn(messages: list[dict]) -> tuple[str, list[dict], dict, dict]:
+def _real_turn(messages: list[dict], cfg) -> tuple[str, list[dict], dict, dict]:
     """Returns (answer, features, trackers, perf_stages) where perf_stages carries
     pod_roundtrip_ms, ranking_ms, and pod_stages from the pod's additive timings."""
     from . import pod_client
 
     _t_pod = time.perf_counter()
-    r = pod_client.turn(messages, max_new=config.MAX_NEW_TOKENS)
+    r = pod_client.turn(messages, cfg.pod, cfg.pod_token, max_new=cfg.model.max_new_tokens)
     pod_roundtrip_ms = (time.perf_counter() - _t_pod) * 1000.0
 
     _t_rank = time.perf_counter()
-    feats = _rank_features(r["candidates"])
+    feats = _rank_features(r["candidates"], cfg.feature_cloud, cfg)
     ranking_ms = (time.perf_counter() - _t_rank) * 1000.0
 
     trackers = r.get("trackers") or {}
@@ -140,6 +155,7 @@ def _real_turn(messages: list[dict]) -> tuple[str, list[dict], dict, dict]:
 
 def analyze_turn(
     messages: list[dict],
+    cfg,
     *,
     message_id: str | None = None,
     ts: float | None = None,
@@ -151,9 +167,9 @@ def analyze_turn(
 
     if runtime.STATE["mode"] == "real":
         try:
-            answer, feats, trackers, timing_data = _real_turn(messages)
+            answer, feats, trackers, timing_data = _real_turn(messages, cfg)
         except Exception as e:
-            runtime.refresh_pod_health()
+            runtime.refresh_pod_health(cfg)
             from . import fanout
             fanout.report_error("pod-down", e)  # instrument_unhealthy concern → Sentry (sanitized)
             if strict:
@@ -161,7 +177,7 @@ def analyze_turn(
             print(f"[analyze] pod turn failed ({e}); synthetic fallback for this turn")
             from . import fallback
 
-            answer, feats = fallback.synth_turn(messages)
+            answer, feats = fallback.synth_turn(messages, cfg.sae, np_source=cfg.np_source())
             trackers = {}
             timing_data = {"stages": {}, "pod_stages": {}}
     else:
@@ -171,7 +187,7 @@ def analyze_turn(
             )
         from . import fallback
 
-        answer, feats = fallback.synth_turn(messages)
+        answer, feats = fallback.synth_turn(messages, cfg.sae, np_source=cfg.np_source())
         trackers = {}
         timing_data = {"stages": {}, "pod_stages": {}}
 
@@ -188,8 +204,8 @@ def analyze_turn(
         response=answer,
         trackers=trackers,
         features=feats,
-        model=config.MODEL_ID,
-        layer=config.LAYER,
+        model=cfg.model.model_id,
+        layer=cfg.model.layer,
     )
     turn_ms = (time.perf_counter() - _t_turn) * 1000.0
     perf: dict = {

@@ -1,0 +1,60 @@
+# config.example.yaml — copy to config.yaml and edit. config.yaml is gitignored.
+# Secrets (ANTHROPIC_API_KEY, SENTRY_DSN, SENTRY_AUTH_TOKEN, POD_TOKEN, HF_TOKEN) go in .env, never here.
+
+runtime:
+  mode: posthoc
+  product_name: GlassBox
+
+model:
+  model_id: unsloth/gemma-3-4b-it
+  layer: 17
+  device: cuda
+  preamble_skip: 12
+  max_new_tokens: 512
+  # Neutral default assistant prompt. See the "medical" profile below for the labeled example.
+  system_prompt: |
+    You are a helpful, honest, and harmless AI assistant. Answer clearly and accurately.
+    When you are uncertain, say so plainly rather than guessing.
+
+sae:
+  release: gemma-scope-2-4b-it-res
+  sae_id_pattern: "layer_{layer}_width_16k_l0_medium"
+  d_in: 2560
+  d_sae: 16384
+  np_model: gemma-3-4b-it
+  np_source_pattern: "{layer}-gemmascope-2-res-16k"
+
+feature_cloud:
+  rank_method: attribution
+  autointerp: true
+
+probes:
+  enabled: [harmful, harmful_prompt, over_confidence]
+  disabled: [uncertainty, hallucination, risk_awareness]
+  builder:
+    agent_model: claude-opus-4-8
+    judge_model: claude-opus-4-8
+    auroc_threshold: 0.75
+
+observability:
+  sentry:
+    environment: production
+    send_io: false   # PHI gate; keep false to never send raw I/O to Sentry
+
+pod:
+  url: http://localhost:8001
+  timeout: 120
+
+# --- Labeled example profile: medical clinical-decision-support (opt-in) ---
+# GlassBox is a general-purpose interpretability/observability tool. Medical is ONE example.
+# To use, copy the prompt below into model.system_prompt above:
+#   system_prompt: |
+#     You are a clinical decision-support assistant for licensed healthcare professionals.
+#     You provide accurate, evidence-based medical information grounded in current clinical
+#     guidelines and the peer-reviewed literature. Accuracy first; calibrated confidence;
+#     safety first (surface contraindications, interactions, special populations); typical
+#     adult dosing with caveats; you support, not replace, the clinician's judgment. Direct
+#     emergencies to emergency services. Define abbreviations on first use.
+# A matching example recon_probe and contrast_prompt for the medical profile:
+#   sae:
+#     recon_probe: "Is ibuprofen safe during the third trimester of pregnancy?"

@@ -4,14 +4,16 @@ Lane A — never imports torch. Prompt/response (io.*) are NEVER read here."""
 from __future__ import annotations
 from collections import deque
 
-from .config import DISABLED_TRACKERS
+# Deprecated tracker IDs — matches ProbeConfig.disabled defaults.
+_DISABLED_TRACKERS: frozenset[str] = frozenset({"uncertainty", "hallucination", "risk_awareness"})
 
 _TRACKER_KEYS = ("score", "proj", "proj_pre", "flag", "reliable", "user_defined", "status")
 
 
 def _observable_trackers(trackers: dict | None) -> dict:
     """Drop deprecated artifacts; keep enabled builtins and deployed custom probes."""
-    return {tid: tr for tid, tr in (trackers or {}).items() if tid not in DISABLED_TRACKERS}
+    return {tid: tr for tid, tr in (trackers or {}).items() if tid not in _DISABLED_TRACKERS}
+
 
 def to_redacted_view(event: dict) -> dict:
     """ALLOW-LIST projection → de-identified view. io.* and adjudication.rationale are never copied,

@@ -1,21 +1,21 @@
-"""Curated feature labels for the offline synthetic fallback. Plausible clinical/linguistic
+"""Curated feature labels for the offline synthetic fallback. Plausible general-purpose
 concepts so the feature map reads believably without any network call."""
 
-CLINICAL_LABELS = [
-    "pregnancy & gestation terms",
-    "medication / drug safety",
-    "anti-inflammatory (NSAID)",
-    "dosage & administration",
+GENERIC_LABELS = [
+    "question framing / inquiry",
+    "explanatory discourse",
     "hedging / expressions of caution",
-    "consulting a physician",
-    "contraindication & risk",
-    "trimester & fetal terms",
-    "reassurance · 'generally safe'",
-    "clinical guidelines reference",
+    "cause-and-effect reasoning",
+    "comparison & contrast",
+    "definitions & terminology",
     "second-person address",
     "affirmation / yes",
     "temporal periods",
-    "symptom description",
-    "renal / hepatic clearance",
-    "drug interaction",
+    "quantities & measurement",
+    "examples & illustration",
+    "uncertainty / qualification",
+    "lists & enumeration",
+    "summary & conclusion",
+    "topic introduction",
+    "factual recall",
 ]

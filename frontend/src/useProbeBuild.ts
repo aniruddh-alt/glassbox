@@ -77,7 +77,12 @@ export function useProbeBuild() {
       const created = await track(text);
       if (created.status === "unavailable" || !created.tracker_id) {
         setPhase("failed");
-        setError("GPU pod unavailable — start the tunnel and gpu_service, then retry.");
+        const detail = (created as { detail?: string }).detail;
+        setError(
+          detail
+            ? detail
+            : "GPU pod unavailable — start the tunnel and gpu_service, then retry.",
+        );
         return;
       }
       trackerRef.current = created.tracker_id;

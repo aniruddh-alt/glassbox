@@ -27,8 +27,8 @@ from urllib.parse import urlparse
 os.environ.setdefault("OPENINFERENCE_HIDE_INPUTS", "true")
 os.environ.setdefault("OPENINFERENCE_HIDE_OUTPUTS", "true")
 
-from . import config
 from . import observability
+from .config import ObsConfig, ProbeConfig
 
 _sentry_on = False
 _tracer = None  # Phoenix OTEL tracer, set in init_sponsors()
@@ -51,7 +51,7 @@ def register_sink(s: Sink) -> None:
     _SINKS.append(s)
 
 
-def fanout(event: dict, perf: dict | None = None) -> None:
+def fanout(event: dict, perf: dict | None = None, *, obs: ObsConfig, probes: ProbeConfig) -> None:
     """Fan one finished cognition_event (+ optional perf) to every sink. CPU only, post-stream."""
     for s in _SINKS:
         try:
@@ -101,15 +101,15 @@ def _level(severity: str) -> str:
     return severity if severity in _VALID_LEVELS else "warning"
 
 
-def _scrub_pii(event: dict, hint: dict):
+def _scrub_pii(event: dict, hint: dict, *, send_io: bool = False):
     """Sentry before_send (supersedes main's _scrub_event). ALWAYS: zero every exception-frame
     local (they carry the prompt/io) + regex-scrub structured PII from every string anywhere.
-    When SENTRY_SEND_IO is off (default), ALSO hard-redact any forbidden-key value so prompt/
+    When send_io is off (default), ALSO hard-redact any forbidden-key value so prompt/
     response can never leak even if some future code path attaches them."""
     for v in event.get("exception", {}).get("values", []):
         for fr in v.get("stacktrace", {}).get("frames", []):
             fr["vars"] = {}
-    redact_keys = set() if config.SENTRY_SEND_IO else _PII_KEYS
+    redact_keys = set() if send_io else _PII_KEYS
 
     def walk(o):
         if isinstance(o, dict):
@@ -139,8 +139,9 @@ def _bucket(u):
     return "high" if (u or 0) >= 0.66 else "med" if (u or 0) >= 0.33 else "low"
 
 
-def _observable_trackers(trackers: dict | None) -> dict:
-    return {tid: tr for tid, tr in (trackers or {}).items() if tid not in config.DISABLED_TRACKERS}
+def _observable_trackers(trackers: dict | None, disabled: list[str] | None = None) -> dict:
+    _disabled = set(disabled) if disabled is not None else set()
+    return {tid: tr for tid, tr in (trackers or {}).items() if tid not in _disabled}
 
 
 _FLAG_PRIORITY = ("harmful", "harmful_prompt", "over_confidence")
@@ -159,50 +160,62 @@ def _flag_reason(event: dict) -> str:
     return "confident_wrong"
 
 
-def sentry_enabled() -> bool:
-    return _sentry_on
+def sentry_enabled(sentry_dsn: str = "") -> bool:
+    return bool(sentry_dsn) if sentry_dsn else _sentry_on
 
 
-def capture_cognition_alarm(event: dict, *, flush: bool = False) -> bool:
+def capture_cognition_alarm(event: dict, obs: ObsConfig | None = None, *, flush: bool = False) -> bool:
     """Emit a PII-free Sentry issue when ``event['flag']`` is true.
 
     Called automatically by ``fanout()`` for every chat turn. Use directly for tests or
     custom hooks. Returns True when a message was queued for Sentry."""
-    if not _sentry_on or not event.get("flag"):
+    if not _sentry_on:
+        return False
+    if not event.get("flag"):
         return False
     import sentry_sdk
 
+    send_io = obs.sentry.send_io if obs is not None else False
     reason = _flag_reason(event)
     cognition = {
         "uncertainty": event.get("uncertainty"),
         "uncertainty_proj": event.get("uncertainty_proj"),
         "trackers": _observable_trackers(event.get("trackers")),
-        "top_features": [f["label"] for f in event.get("features", [])],
+        "top_features": [f["label"] for f in (event.get("features") or [])[:15]],
     }
-    if config.SENTRY_SEND_IO:
+    if send_io:
         io = event.get("io") or {}
         cognition["question"] = _scrub(io.get("user_msg", "") or "")
         cognition["answer"] = _scrub(io.get("response", "") or "")
-    with sentry_sdk.new_scope() as scope:
-        scope.fingerprint = ["glassbox", "medical-cognition", reason]
-        scope.set_tag("model", event.get("model"))
-        scope.set_tag("event_type", "confident_wrong")
-        scope.set_tag("flag_reason", reason)
-        scope.set_tag("message_id", event.get("message_id"))
-        scope.set_tag("uncertainty_bucket", _bucket(event.get("uncertainty")))
-        scope.set_context("cognition", cognition)
-        sentry_sdk.capture_message(
-            "Confident-wrong medical answer", level=_level(event.get("severity", "warning"))
-        )
-    if flush:
+    try:
+        with sentry_sdk.new_scope() as scope:
+            scope.fingerprint = ["glassbox", "medical-cognition", reason]
+            scope.set_tag("model", str(event.get("model") or "unknown"))
+            scope.set_tag("event_type", "confident_wrong")
+            scope.set_tag("flag_reason", str(reason))
+            scope.set_tag("message_id", str(event.get("message_id") or "unknown"))
+            scope.set_tag("uncertainty_bucket", _bucket(event.get("uncertainty")))
+            scope.set_context("cognition", cognition)
+            sentry_sdk.capture_message(
+                f"Confident-wrong medical answer — {reason}", level=_level(event.get("severity", "warning"))
+            )
+        # Flush so short requests and the default transport queue cannot drop the alarm.
         sentry_sdk.flush(timeout=3)
-    return True
+        print(f"[fanout] sentry alarm emitted: reason={reason} message_id={event.get('message_id')}")
+        return True
+    except Exception as e:  # noqa: BLE001 — log but never break fanout / the chat stream
+        print(f"[fanout] sentry alarm failed ({reason}, {event.get('message_id')}): {e}")
+        return False
 
 
 class SentrySink:
     name = "sentry"
+
+    def __init__(self, obs: ObsConfig | None = None) -> None:
+        self._obs = obs
+
     def emit(self, event: dict, perf: dict | None = None) -> None:
-        capture_cognition_alarm(event)
+        capture_cognition_alarm(event, self._obs, flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -265,39 +278,52 @@ class StoreSink:
         observability.STORE.record(observability.to_redacted_view(event), perf)
 
 
-def _phoenix_is_local() -> bool:
-    host = (urlparse(config.PHOENIX_ENDPOINT).hostname or "").lower()
+# WS1: delete this entire Phoenix branch (and _PHOENIX_ENDPOINT, PhoenixSink, _stage_spans, _phoenix_is_local)
+_PHOENIX_ENDPOINT: str | None = None  # WS1: delete — Phoenix removed; WS0 disables this branch
+
+
+def _phoenix_is_local(endpoint: str | None) -> bool:
+    if endpoint is None:
+        return False
+    host = (urlparse(endpoint).hostname or "").lower()
     return host in {"localhost", "127.0.0.1", "::1", ""}
 
 
-def init_sponsors() -> None:
+def init_sponsors(obs: ObsConfig | None = None, sentry_dsn: str = "") -> None:
     """Call once at FastAPI startup. Safe to call with missing config — each sponsor
     is independently optional so the app still runs locally without DSN/Phoenix."""
     global _tracer, _sentry_on
 
+    _obs = obs if obs is not None else ObsConfig()
+
     # --- Sentry (incident view) ---
-    if config.SENTRY_DSN:
+    if sentry_dsn:
         import sentry_sdk
+
+        def _before_send(event, hint):
+            return _scrub_pii(event, hint, send_io=_obs.sentry.send_io)
+
         sentry_sdk.init(
-            dsn=config.SENTRY_DSN,
-            environment=config.SENTRY_ENVIRONMENT,
-            release=config.SENTRY_RELEASE,        # None → Sentry auto-detects git SHA
+            dsn=sentry_dsn,
+            environment=_obs.sentry.environment,
+            release=_obs.sentry.release,          # None → Sentry auto-detects git SHA
             traces_sample_rate=0.0,               # tracing goes to Phoenix (OTel), not Sentry perf
             send_default_pii=False,               # medical tool: no IPs / headers / PHI by default
             include_local_variables=False,        # CRITICAL: frame locals carry the prompt + io.*
             include_source_context=False,
             max_request_body_size="never",
             enable_logs=True,                     # stdlib logging → Sentry (sentry-sdk >= 2.35)
-            before_send=_scrub_pii,               # whole-event scrub (supersedes main's _scrub_event)
+            before_send=_before_send,             # whole-event scrub (supersedes main's _scrub_event)
         )
         _sentry_on = True
 
     # --- Arize Phoenix (analytics view) — local-only for patient data ---
-    if _phoenix_is_local():
+    # WS1: delete this entire Phoenix branch (and _PHOENIX_ENDPOINT, PhoenixSink, _stage_spans, _phoenix_is_local)
+    if _PHOENIX_ENDPOINT and _phoenix_is_local(_PHOENIX_ENDPOINT):
         try:
             from phoenix.otel import register
             provider = register(project_name="glassbox",
-                                endpoint=f"{config.PHOENIX_ENDPOINT.rstrip('/')}/v1/traces",
+                                endpoint=f"{_PHOENIX_ENDPOINT.rstrip('/')}/v1/traces",
                                 batch=True, auto_instrument=False)
             globals()["_tracer"] = provider.get_tracer(__name__)
             register_sink(PhoenixSink())
@@ -307,7 +333,7 @@ def init_sponsors() -> None:
         print("[fanout] PHOENIX_ENDPOINT is non-local; PhoenixSink disabled (PII fail-closed).")
 
     if _sentry_on:
-        register_sink(SentrySink())
+        register_sink(SentrySink(obs=_obs))
     register_sink(StoreSink())   # store is always on (in-process, redacted)
 
 

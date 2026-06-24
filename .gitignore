@@ -39,3 +39,16 @@ frontend/dist/
 .idea/
 .vscode/
 *.log
+
+# Working config (config.example.yaml is the committed template)
+config.yaml
+
+# Generated probe-builder output (the 6 built-in artifacts ARE committed)
+backend/science/probe_jobs/
+backend/science/artifacts/watch-*.json
+
+# pytest
+.pytest_cache/
+
+# On-disk SDD scaffolding (deleted in Task 16; ignored so it never reappears in git status)
+.superpowers/

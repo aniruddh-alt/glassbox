@@ -32,6 +32,8 @@ from . import config, runtime
 from .analyze import analyze_turn
 from .fanout import fanout, init_sponsors
 
+_cfg = config.load_config()  # Transitional cfg — Task 11 threads cfg through call chain.
+
 _FIXTURE = pathlib.Path(__file__).parents[1] / "fixtures" / "medqa_prompts.json"
 
 
@@ -63,7 +65,7 @@ def _load_dataset_prompts(limit: int) -> list[dict]:
 
 
 def _ensure_real_mode() -> None:
-    runtime.refresh_pod_health()
+    runtime.refresh_pod_health(_cfg)
     if runtime.STATE["mode"] != "real":
         print(
             f"[batch] backend mode={runtime.STATE['mode']} — need real (check POD_URL / pod health)",
@@ -101,11 +103,8 @@ def main() -> None:
 
     _ensure_real_mode()
     if not args.dry_run:
-        init_sponsors()
-        print(
-            f"[batch] sponsors: sentry={'on' if config.SENTRY_DSN else 'off'} "
-            f"phoenix={config.PHOENIX_ENDPOINT}"
-        )
+        init_sponsors(_cfg.observability, _cfg.sentry_dsn)
+        print(f"[batch] sponsors: sentry={'on' if _cfg.sentry_dsn else 'off'}")
 
     print(f"[batch] running {len(prompts)} prompts (mode={runtime.STATE['mode']})")
     results: list[dict] = []
@@ -117,7 +116,7 @@ def main() -> None:
         print(f"  Q: {question[:100]}{'...' if len(question) > 100 else ''}")
 
         if args.strict:
-            runtime.refresh_pod_health()
+            runtime.refresh_pod_health(_cfg)
             if runtime.STATE["mode"] != "real" or not runtime.STATE.get("pod_reachable", True):
                 print(
                     f"[batch] pod not ready (mode={runtime.STATE['mode']}, "
@@ -129,6 +128,7 @@ def main() -> None:
         t0 = time.time()
         answer, event, _perf = analyze_turn(
             [{"role": "user", "content": question}],
+            _cfg,
             message_id=qid,
             strict=args.strict,
         )
@@ -142,7 +142,7 @@ def main() -> None:
 
         if not args.dry_run:
             try:
-                fanout(payload)
+                fanout(payload, obs=_cfg.observability, probes=_cfg.probes)
             except Exception as e:  # noqa: BLE001
                 print(f"  fanout error: {e}")
 

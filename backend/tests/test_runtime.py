@@ -1,11 +1,18 @@
 from backend import runtime
+from backend.config import AppConfig
 
 
-def test_no_pod_url_stays_fallback(monkeypatch):
-    monkeypatch.setattr(runtime.config, "POD_URL", "")
+def _cfg(pod_url="", poll=5.0):
+    cfg = AppConfig()
+    cfg.pod.url = pod_url
+    cfg.pod.poll_interval = poll
+    return cfg
+
+
+def test_no_pod_url_stays_fallback():
     runtime.STATE.clear()
     runtime.STATE.update(mode="loading")
-    runtime.start_loading()
+    runtime.start_loading(_cfg(pod_url=""))
     assert runtime.STATE["mode"] == "fallback"
     assert runtime.STATE["pod_reachable"] is False
 
@@ -35,24 +42,22 @@ def test_apply_pod_health_unreachable():
 
 
 def test_poll_pod_once_uses_client(monkeypatch):
-    monkeypatch.setattr(runtime.config, "POD_URL", "http://pod.test")
     import backend.pod_client as pc
 
-    monkeypatch.setattr(pc, "health", lambda: {"mode": "real", "model_loaded": True, "sae_loaded": True})
-    state = runtime._poll_pod_once()
+    monkeypatch.setattr(pc, "health", lambda pod, pod_token: {"mode": "real", "model_loaded": True, "sae_loaded": True})
+    state = runtime._poll_pod_once(_cfg(pod_url="http://pod.test"))
     assert state["mode"] == "real"
     assert state["pod_reachable"] is True
 
 
 def test_poll_pod_once_falls_back_on_error(monkeypatch):
-    monkeypatch.setattr(runtime.config, "POD_URL", "http://pod.test")
     import backend.pod_client as pc
 
-    def boom():
-        raise pc.PodError("down")
+    def boom(pod, pod_token):
+        raise pc.PodError(0, "health")
 
     monkeypatch.setattr(pc, "health", boom)
-    state = runtime._poll_pod_once()
+    state = runtime._poll_pod_once(_cfg(pod_url="http://pod.test"))
     assert state["mode"] == "fallback"
     assert state["pod_reachable"] is False
 
@@ -65,7 +70,7 @@ def test_health_payload_shape():
         pod_reachable=False,
         pod_health=None,
     )
-    p = runtime.health_payload()
+    p = runtime.health_payload(_cfg(pod_url="http://pod.test"))
     assert {
         "mode",
         "model_loaded",
@@ -85,46 +90,29 @@ def test_health_payload_shape():
 
 def test_start_loading_eager_polls_pod(monkeypatch):
     monkeypatch.setenv("GLASSBOX_EAGER_LOAD", "1")
-    monkeypatch.setattr(runtime.config, "POD_URL", "http://pod.test")
-    monkeypatch.setattr(runtime, "_ensure_poll_loop", lambda: None, raising=False)
+    monkeypatch.setattr(runtime, "_ensure_poll_loop", lambda cfg: None, raising=False)
     import backend.pod_client as pc
 
-    monkeypatch.setattr(
-        pc,
-        "health",
-        lambda: {"mode": "real", "model_loaded": True, "sae_loaded": True},
-    )
-    runtime.start_loading()
+    monkeypatch.setattr(pc, "health", lambda pod, pod_token: {"mode": "real", "model_loaded": True, "sae_loaded": True})
+    runtime.start_loading(_cfg(pod_url="http://pod.test"))
     assert runtime.STATE["mode"] == "real"
 
 
 def test_eager_load_also_keeps_polling(monkeypatch):
-    """Regression: eager load must do the synchronous first poll AND keep a background
-    poll running, so a pod that blips offline then recovers self-heals back to mode=real
-    instead of being trapped in fallback until the backend is restarted."""
     monkeypatch.setenv("GLASSBOX_EAGER_LOAD", "1")
-    monkeypatch.setattr(runtime.config, "POD_URL", "http://pod.test")
     import backend.pod_client as pc
 
-    monkeypatch.setattr(
-        pc, "health", lambda: {"mode": "real", "model_loaded": True, "sae_loaded": True}
-    )
+    monkeypatch.setattr(pc, "health", lambda pod, pod_token: {"mode": "real", "model_loaded": True, "sae_loaded": True})
     started: list[bool] = []
-    monkeypatch.setattr(runtime, "_ensure_poll_loop", lambda: started.append(True), raising=False)
-
-    runtime.start_loading()
-
-    assert runtime.STATE["mode"] == "real"  # eager still blocks on the first poll
-    assert started == [True]  # ...and ongoing polling is started (the fix)
+    monkeypatch.setattr(runtime, "_ensure_poll_loop", lambda cfg: started.append(True), raising=False)
+    runtime.start_loading(_cfg(pod_url="http://pod.test"))
+    assert runtime.STATE["mode"] == "real"
+    assert started == [True]
 
 
 def test_non_eager_starts_poll_loop(monkeypatch):
-    """Non-eager startup must also start the background poll loop."""
     monkeypatch.delenv("GLASSBOX_EAGER_LOAD", raising=False)
-    monkeypatch.setattr(runtime.config, "POD_URL", "http://pod.test")
     started: list[bool] = []
-    monkeypatch.setattr(runtime, "_ensure_poll_loop", lambda: started.append(True), raising=False)
-
-    runtime.start_loading()
-
+    monkeypatch.setattr(runtime, "_ensure_poll_loop", lambda cfg: started.append(True), raising=False)
+    runtime.start_loading(_cfg(pod_url="http://pod.test"))
     assert started == [True]

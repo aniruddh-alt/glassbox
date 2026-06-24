@@ -9,7 +9,7 @@ export type ProbeDisplayPrefs = Record<string, boolean>;
 
 function defaultEnabled(id: string): boolean {
   if (HIDDEN_PROBES.has(id)) return false;
-  return isBuiltinProbe(id);
+  return true;
 }
 
 function loadPrefs(): ProbeDisplayPrefs {
@@ -35,7 +35,7 @@ export function isProbeEnabled(id: string, prefs: ProbeDisplayPrefs): boolean {
 }
 
 export function collectProbeIds(
-  ...sources: Array<Record<string, unknown> | string[] | null | undefined>
+  ...sources: Array<Record<string, unknown> | readonly string[] | null | undefined>
 ): string[] {
   const ids = new Set<string>();
   for (const src of sources) {

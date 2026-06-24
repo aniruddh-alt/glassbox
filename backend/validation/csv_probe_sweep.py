@@ -32,6 +32,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from backend import config
+from backend.config import load_config as _load_config
 from backend.science import persona
 from backend.validation.harmfulness_pipeline import _direction
 
@@ -229,7 +230,7 @@ def main(argv: list[str] | None = None) -> None:
     results = sweep(harmful, benign, layers=layers, provider=provider)
     print("=" * 70)
 
-    best = max(results, key=lambda L: (results[L]["normed"], -abs(L - config.LAYER)))
+    best = max(results, key=lambda L: (results[L]["normed"], -abs(L - _load_config().model.layer)))
     r = results[best]
     print(f"\nBEST layer (normed DoM): {best}")
     print(f"  normed AUROC: {r['normed']:.4f}")

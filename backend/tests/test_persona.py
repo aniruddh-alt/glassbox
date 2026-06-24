@@ -1,8 +1,10 @@
 import json
+from pathlib import Path
 
 import pytest
 import torch
 
+from backend.config import ProbeConfig
 from backend.science import concept_synth
 from backend.science import persona
 
@@ -61,7 +63,8 @@ def test_load_tracker_artifact_registers_ready_direction(tmp_path):
         )
     )
 
-    loaded = persona.load_artifacts(tmp_path)
+    probes = ProbeConfig(artifacts_dir=tmp_path, disabled=[])
+    loaded = persona.load_artifacts(probes)
     out = persona.score_all_trackers(None, torch.tensor([-2.0, 0.0]))
 
     assert loaded == ["risk_awareness"]
@@ -73,8 +76,24 @@ def test_template_artifact_does_not_register_without_direction(tmp_path):
     artifact = tmp_path / "risk_awareness.json"
     artifact.write_text(json.dumps({"id": "risk_awareness", "threshold": 0.35}))
 
-    assert persona.load_artifacts(tmp_path) == []
+    probes = ProbeConfig(artifacts_dir=tmp_path, disabled=[])
+    assert persona.load_artifacts(probes) == []
     assert persona.score_all_trackers(None, torch.tensor([1.0, 0.0])) == {}
+
+
+def test_load_artifacts_respects_disabled(tmp_path):
+    # two artifacts on disk: one enabled-named, one disabled-named
+    (tmp_path / "harmful.json").write_text(
+        '{"tracker_id": "harmful", "direction": [0.1, 0.2], "norm_mean": null, "norm_std": null, "threshold": 0.5}'
+    )
+    (tmp_path / "uncertainty.json").write_text(
+        '{"tracker_id": "uncertainty", "direction": [0.1, 0.2], "norm_mean": null, "norm_std": null, "threshold": 0.5}'
+    )
+    persona.clear_trackers()
+    probes = ProbeConfig(artifacts_dir=tmp_path, disabled=["uncertainty"])
+    loaded = persona.load_artifacts(probes)
+    assert "harmful" in loaded
+    assert "uncertainty" not in loaded
 
 
 def test_malformed_tracker_does_not_fail_other_scores():

@@ -5,8 +5,10 @@ OWNER: Lane A.
 
 from __future__ import annotations
 
-from .config import DEFAULT_THRESHOLD
 from .schema import IO, CognitionEvent
+
+# Default probe-flag threshold — matches ProbeConfig.default_threshold.
+_DEFAULT_THRESHOLD: float = 0.5
 
 
 def build_cognition_event(
@@ -35,7 +37,7 @@ def build_cognition_event(
         uncertainty_proj = meter.get("proj")
         uncertainty_proj_pre = meter.get("proj_pre")
     flag = any(
-        bool(t.get("flag", (t.get("score") or 0.0) >= DEFAULT_THRESHOLD))
+        bool(t.get("flag", (t.get("score") or 0.0) >= _DEFAULT_THRESHOLD))
         for t in trackers.values()
     )
     return CognitionEvent(

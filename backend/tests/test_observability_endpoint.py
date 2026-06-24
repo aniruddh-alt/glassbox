@@ -1,17 +1,13 @@
-"""Tests for GET /api/observability (Task 15).
+"""Tests for GET /api/observability.
 
 Verifies the merged-shape contract from §7 of the design spec.
-Does NOT test POST /api/observability/eval (coherence_eval doesn't exist yet).
 """
-import asyncio
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.app import app
 from backend import observability, sentry_api
-
-client = TestClient(app)
 
 
 def _empty_snapshot():
@@ -31,11 +27,12 @@ def test_observability_endpoint_shape(monkeypatch):
     """GET /api/observability returns the §7 merged shape with health, sentry, phoenix_ui_url."""
     monkeypatch.setattr(observability.STORE, "snapshot", lambda: _empty_snapshot())
     # list_recent_issues is async; monkeypatch with a coroutine function
-    async def _no_issues(limit=15):
+    async def _no_issues(sentry, token, limit=15):
         return []
     monkeypatch.setattr(sentry_api, "list_recent_issues", _no_issues)
 
-    r = client.get("/api/observability")
+    with TestClient(app) as c:
+        r = c.get("/api/observability")
     assert r.status_code == 200
     j = r.json()
 
@@ -60,8 +57,8 @@ def test_observability_endpoint_shape(monkeypatch):
     health = j["health"]
     assert {"mode", "model", "layer", "trackers", "pod_reachable"} <= set(health)
 
-    # phoenix_ui_url is a string
-    assert isinstance(j["phoenix_ui_url"], str)
+    # phoenix_ui_url is present (None until WS1 removes it)
+    assert j["phoenix_ui_url"] is None or isinstance(j["phoenix_ui_url"], str)
 
 
 def test_observability_endpoint_no_pii(monkeypatch):
@@ -77,11 +74,12 @@ def test_observability_endpoint_no_pii(monkeypatch):
         }
     ]
     monkeypatch.setattr(observability.STORE, "snapshot", lambda: snap)
-    async def _no_issues(limit=15):
+    async def _no_issues(sentry, token, limit=15):
         return []
     monkeypatch.setattr(sentry_api, "list_recent_issues", _no_issues)
 
-    r = client.get("/api/observability")
+    with TestClient(app) as c:
+        r = c.get("/api/observability")
     assert r.status_code == 200
     text = r.text
     # none of the PII marker strings should appear
@@ -92,12 +90,13 @@ def test_observability_endpoint_no_pii(monkeypatch):
 def test_observability_endpoint_sentry_issues_forwarded(monkeypatch):
     """Issues returned by sentry_api are forwarded in the sentry.issues list."""
     monkeypatch.setattr(observability.STORE, "snapshot", lambda: _empty_snapshot())
-    async def _with_issues(limit=15):
+    async def _with_issues(sentry, token, limit=15):
         return [{"shortId": "G-1", "title": "Confident-wrong medical answer", "level": "warning",
                  "count": 3, "lastSeen": "2026-06-21", "permalink": "https://sentry.io/issues/1"}]
     monkeypatch.setattr(sentry_api, "list_recent_issues", _with_issues)
 
-    r = client.get("/api/observability")
+    with TestClient(app) as c:
+        r = c.get("/api/observability")
     assert r.status_code == 200
     j = r.json()
     assert j["sentry"]["issues"][0]["shortId"] == "G-1"

@@ -1,4 +1,4 @@
-"""Backend readiness. Polls the GPU pod when POD_URL is set; otherwise stays on synthetic fallback.
+"""Backend readiness. Polls the GPU pod when pod.url is set; otherwise stays on synthetic fallback.
 State is read per-request by the API.
 
 OWNER: Lane A. Importing this module must NOT import torch (Global Constraint).
@@ -9,8 +9,6 @@ from __future__ import annotations
 import os
 import threading
 import time
-
-from . import config
 
 STATE: dict = {
     "mode": "loading",
@@ -40,56 +38,45 @@ def _apply_pod_health(h: dict | None, *, reachable: bool) -> dict:
     return dict(STATE)
 
 
-def _poll_pod_once() -> dict:
+def _poll_pod_once(cfg) -> dict:
     """Fetch pod /health once. Never raises."""
-    if not config.POD_URL:
+    if not cfg.pod.url:
         return _apply_pod_health(None, reachable=False)
     try:
         from . import pod_client
 
-        return _apply_pod_health(pod_client.health(), reachable=True)
+        return _apply_pod_health(pod_client.health(cfg.pod, cfg.pod_token), reachable=True)
     except Exception as e:  # noqa: BLE001
         print(f"[runtime] pod health poll failed ({e})")
         return _apply_pod_health(None, reachable=False)
 
 
-def _pod_poll_loop() -> None:
+def _pod_poll_loop(cfg) -> None:
     while True:
-        _poll_pod_once()
-        time.sleep(config.POD_POLL_INTERVAL)
+        _poll_pod_once(cfg)
+        time.sleep(cfg.pod.poll_interval)
 
 
 _poll_thread: threading.Thread | None = None
 
 
-def _ensure_poll_loop() -> None:
-    """Start the background pod-health poll loop once (idempotent).
-
-    Continuous polling is what lets a pod that blips offline and then recovers self-heal back
-    to mode=real. Without it the backend can get trapped in fallback: once mode != "real",
-    analyze_turn stops calling refresh_pod_health(), so nothing ever re-checks the pod.
-    """
+def _ensure_poll_loop(cfg) -> None:
+    """Start the background pod-health poll loop once (idempotent)."""
     global _poll_thread
     if _poll_thread is not None and _poll_thread.is_alive():
         return
-    _poll_thread = threading.Thread(target=_pod_poll_loop, daemon=True)
+    _poll_thread = threading.Thread(target=_pod_poll_loop, args=(cfg,), daemon=True)
     _poll_thread.start()
 
 
-def refresh_pod_health() -> dict:
+def refresh_pod_health(cfg) -> dict:
     """Re-check pod readiness (e.g. after a failed turn)."""
-    return _poll_pod_once()
+    return _poll_pod_once(cfg)
 
 
-def start_loading() -> None:
-    """Bring the real path online. Called once at FastAPI startup.
-
-    When POD_URL is set, always keep a background poll running so a transient pod blip
-    self-heals. GLASSBOX_EAGER_LOAD=1 additionally does the first poll synchronously, so
-    startup blocks until the initial pod health is known. When POD_URL is unset, stay on
-    synthetic fallback.
-    """
-    if not config.POD_URL:
+def start_loading(cfg) -> None:
+    """Bring the real path online. Called once at FastAPI startup."""
+    if not cfg.pod.url:
         STATE.update(
             mode="fallback",
             model_loaded=False,
@@ -101,22 +88,24 @@ def start_loading() -> None:
 
     STATE["mode"] = "loading"
     if os.getenv("GLASSBOX_EAGER_LOAD") == "1":
-        _poll_pod_once()
-    _ensure_poll_loop()
+        _poll_pod_once(cfg)
+    _ensure_poll_loop(cfg)
 
 
-def health_payload() -> dict:
+def health_payload(cfg) -> dict:
     ph = STATE.get("pod_health") or {}
     return {
         "mode": STATE["mode"],
         "model_loaded": STATE["model_loaded"],
         "sae_loaded": STATE["sae_loaded"],
-        "model": config.MODEL_ID,
-        "layer": config.LAYER,
-        "d_sae": ph.get("d_sae", config.D_SAE),
+        "model": cfg.model.model_id,
+        "layer": cfg.model.layer,
+        "d_sae": ph.get("d_sae", cfg.sae.d_sae),
         "trackers": ph.get("trackers", []),
         "sae_recon_cosine": STATE.get("sae_recon_cosine", ph.get("sae_recon_cosine")),
         "sae_recon_ok": STATE.get("sae_recon_ok", ph.get("sae_recon_ok")),
         "pod_reachable": STATE.get("pod_reachable", False),
-        "pod_url_configured": bool(config.POD_URL),
+        "pod_url_configured": bool(cfg.pod.url),
+        "anthropic_configured": ph.get("anthropic_configured"),
+        "active_probe_jobs": ph.get("active_probe_jobs"),
     }

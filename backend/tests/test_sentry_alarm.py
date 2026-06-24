@@ -39,9 +39,44 @@ def test_capture_cognition_alarm_requires_flag(monkeypatch):
             "trackers": {"over_confidence": {"score": 0.9, "flag": True}},
             "features": [{"label": "dosing"}],
         },
+        None,
         flush=True,
     ) is True
-    assert captured["msg"] == "Confident-wrong medical answer"
+    assert captured["msg"].startswith("Confident-wrong medical answer")
+    assert "over_confidence" in captured["msg"]
+
+
+def test_replay_sentry_endpoint(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from backend.app import app
+    from backend import observability
+
+    store = observability.ObservabilityStore()
+    monkeypatch.setattr(observability, "STORE", store)
+    store.record(
+        {
+            "message_id": "m-flag",
+            "ts": 1.0,
+            "flag": True,
+            "severity": "warning",
+            "trackers": {"harmful_prompt": {"score": 0.91, "flag": True}},
+            "features": [{"index": 1, "label": "crisis"}],
+        },
+        None,
+    )
+    monkeypatch.setattr("backend.app.sentry_enabled", lambda dsn: True)
+    captured = {}
+
+    def _capture(ev, obs=None, *, flush=False):
+        captured["reason"] = __import__("backend.fanout", fromlist=["_flag_reason"])._flag_reason(ev)
+        return True
+
+    monkeypatch.setattr("backend.app.capture_cognition_alarm", _capture)
+    r = TestClient(app).post("/api/observability/replay-sentry")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert captured["reason"] == "harmful_prompt"
 
 
 def test_test_sentry_endpoint(monkeypatch):
@@ -49,12 +84,12 @@ def test_test_sentry_endpoint(monkeypatch):
 
     from backend.app import app
 
-    monkeypatch.setattr("backend.app.sentry_enabled", lambda: False)
+    monkeypatch.setattr("backend.app.sentry_enabled", lambda dsn: False)
     r = TestClient(app).post("/api/observability/test-sentry")
     assert r.status_code == 503
 
-    monkeypatch.setattr("backend.app.sentry_enabled", lambda: True)
-    monkeypatch.setattr("backend.app.capture_cognition_alarm", lambda ev, flush=False: True)
+    monkeypatch.setattr("backend.app.sentry_enabled", lambda dsn: True)
+    monkeypatch.setattr("backend.app.capture_cognition_alarm", lambda ev, obs=None, *, flush=False: True)
     r = TestClient(app).post("/api/observability/test-sentry")
     assert r.status_code == 200
     assert r.json()["ok"] is True
