@@ -1,128 +1,83 @@
+<div align="center">
+
+<img src="docs/assets/logo.svg" alt="GlassBox" width="72" height="72" />
+
 # GlassBox
 
-**Cognition-observability for medical LLMs.** A clinician chats with an open model; GlassBox surfaces the model's *internal state* — an SAE "feature cloud" of what concepts are firing, plus calibrated probes that flag when the model is **internally uncertain but verbally confident** (the confident-wrong zone). Every message emits one `cognition_event` that fans out to Sentry, Arize Phoenix, the UI, and (when flagged) a Claude honesty-judge.
+**Interpretability-grade observability for open-weight LLMs.**
 
-> UC Berkeley AI Hackathon · 24h · 3 lanes (A-Backend / B-Science / C-Frontend)
-> **Surface uncertainty, never suppress it.**
+*Surface uncertainty, never suppress it.*
 
-Licensed under [MIT](LICENSE).
+[![License: MIT](https://img.shields.io/badge/License-MIT-000.svg)](LICENSE)
 
----
-
-## Hackathon demo (5 minutes)
-
-**Three tabs:** Chat · Build · Observe
-
-| Tab | What to show |
-|-----|----------------|
-| **Chat** | Medical Q&A with live SAE feature cloud + **harmful** and **over-confidence** probe meters |
-| **Build** | Natural-language probe builder — Claude designs a trait, Gemma generates contrastive pairs, a calibrated probe deploys live |
-| **Observe** | Phoenix traces, Sentry alarms, KPI strip, probe score trends |
-
-**Tier A — no GPU (works everywhere):** `uv sync` + frontend dev server → backend runs in **fallback mode** with synthetic features. Good for UI walkthrough.
-
-**Tier B — full stack:** Anthropic API key + GPU pod running `gpu_service` (see `docs/tailscale-pod-runbook.md`). Enables real activations, live probes, and the Build pipeline.
-
-```bash
-cp .env.example .env   # ANTHROPIC_API_KEY required for Build + labels
-uv sync && uv run uvicorn backend.app:app --port 8000
-cd frontend && npm install && npm run dev
-# open http://localhost:5173
-```
+</div>
 
 ---
 
-## The one-paragraph architecture
+GlassBox lets you watch an open-weight model's internal state while it answers. It runs the model with a single forward hook on one layer and turns that activation into two signals per turn:
 
-A clinician chats with `unsloth/gemma-3-4b-it` over **POST + NDJSON** (never SSE — it breaks through Cloudflare). On the GPU, the model generates while **one forward hook on `model.model.layers[17]`** captures the residual stream. That single activation feeds **two method families**:
+- **Feature cloud** — the top SAE features firing in the residual stream, i.e. which concepts are active. Exploratory: labels are auto-interp and always shown with a caveat.
+- **Probes** — calibrated linear probes (diff-of-means + logistic regression) that score concepts such as over-confidence or harmful intent, and flag when the model is *internally uncertain but verbally confident*.
 
-- **Family A — SAE feature cloud** (Gemma Scope `layer_17/width_16k`): top-k firing features → the exploratory "what's lighting up" view. *Labels are auto-interp and unreliable — always shown with caveats.*
-- **Family B — persona-vector probes** (diff-of-means + calibrated logistic regression at layer 17): calibrated **harmful** and **over-confidence** scores, plus **user-defined probes** built on the Build tab (`POST /api/track` → interpretability agent on the GPU pod).
+You can train your own probe from a plain-language description on the **Build** tab. Every turn emits one structured event (`CognitionEvent`, see `backend/schema.py`) that the UI renders and Sentry alerts on when a probe trips.
 
-Downstream on **CPU**, the FastAPI handler assembles **exactly one `cognition_event`** per message and fans it out to four consumers that never touch the GPU: **Sentry** (Issue), **Arize Phoenix** (span + eval), the **chat UI**, and **Claude** (auto-interp labels + async adjudication of flagged events).
+GlassBox is general-purpose. A medical clinical-decision-support setup ships as one labeled, opt-in example profile in `config.example.yaml`.
+
+## Architecture
+
+Two FastAPI processes with a hard split:
+
+- **Orchestration backend** (`backend/app.py`) runs on CPU and never imports torch. It assembles the per-turn event and fans it out.
+- **GPU pod service** (`backend/gpu_service.py`) owns torch. It generates with the model while one hook on the configured layer captures the residual stream; that single activation feeds both the SAE feature cloud and the probes.
 
 ```
-UI ──POST /api/chat──▶ [GPU] gemma-3-4b-it generate + layer-17 hook
-                            │  (one residual activation)
-                ┌───────────┴───────────┐
-        [GPU] SAE top-k          [GPU] persona-vector probes
-         (Family A: cloud)        (Family B: reliable scores)
-                └───────────┬───────────┘
-                     [CPU] build ONE cognition_event
-                            │ fanout()
-        ┌──────────┬────────┴────────┬──────────────┐
-      Sentry    Phoenix          chat UI       Claude judge (async, if flagged)
+UI ──POST /api/chat──▶  GPU pod: generate + layer hook
+                              │ (one residual activation)
+                   ┌──────────┴──────────┐
+              SAE feature cloud     persona-vector probes
+                   └──────────┬──────────┘
+                   backend: build one CognitionEvent
+                              │ fanout
+                   ┌──────────┼───────────┐
+                  UI        Sentry     Claude judge
+                          (when flagged)   (async, when flagged)
 ```
 
-**Model decision (LOCKED):** `unsloth/gemma-3-4b-it` (layer 17) + Gemma Scope. `unsloth/gemma-3-4b-it` is ungated and loads without a HuggingFace token. Llama-3.1-8b was rejected — Neuronpedia label coverage is a verified tie, so 8b's ~4× VRAM / ~3–4× slower tok/s buys nothing, and the safety signal (Family B) is model-agnostic.
-
----
-
-## The 4 interface contracts (freeze in hour 1, then build in parallel)
-
-1. **Shape contract** — `backend/schema.py` (pydantic `CognitionEvent`) is the source of truth. `frontend/src/types.ts` and `fixtures/cognition_event.sample.json` mirror it. No lane changes the shape without 3-way agreement.
-2. **A↔C wire protocol** — `POST /api/chat` returns `application/x-ndjson`: zero-or-more `{"type":"token",...}` lines, then exactly one `{"type":"event", ...CognitionEvent}`. **Frontend builds fully against `fixtures/` before Backend streams real data.**
-3. **A↔B function contract** — Science exposes three torch-only functions Backend imports: `sae_topk(act, k=15)`, `score_all_trackers(act_last, act_resp)`, `synth_concept(name, desc)`. The **configured-layer activation tensor is the only object crossing the GPU→science boundary.** B never imports FastAPI; A never touches torch internals.
-4. **A↔sponsors seam** — `backend/fanout.py:fanout(event: dict)` is the single place every sponsor SDK lives. Adding/removing a sponsor = editing only `fanout.py`. Nothing on this path imports torch.
-
----
+`POST /api/chat` returns `application/x-ndjson`: zero or more `{"type":"token",...}` lines, then exactly one `{"type":"event", ...CognitionEvent}`. The default model is `unsloth/gemma-3-4b-it` with Gemma Scope SAEs at layer 17, which is ungated and loads without a HuggingFace token.
 
 ## Quickstart
 
 ```bash
-# 1. Install dependencies
-uv sync                   # light install (no ML stack — runs in synthetic fallback mode)
-uv sync --extra ml        # full install (torch + sae_lens — required for real SAE activations)
+# 1. Install
+uv sync                 # base install — runs in synthetic fallback mode, no GPU
+uv sync --extra ml      # full install — torch + sae_lens, for real activations
 
-# 2. Configure environment
-cp .env.example .env      # fill in ANTHROPIC_API_KEY; SENTRY_DSN is optional
+# 2. Configure
+cp config.example.yaml config.yaml   # edit as needed; config.yaml is gitignored
+cp .env.example .env                  # ANTHROPIC_API_KEY enables Build + labels; SENTRY_DSN optional
 
-# 3. Start the backend  (port 8000)
+# 3. Backend (port 8000)
 uv run uvicorn backend.app:app --port 8000
-#  → Without the ml extra (or when model weights are absent), the backend
-#    automatically falls back to synthetic mode: health reports "mode":"fallback",
-#    features are generated synthetically, and uncertainty scores are null.
-#  → With the ml extra and weights present, health reports "mode":"real".
 
-# 4. (Optional) Observability stack
-bash scripts/run_phoenix.sh         # Arize Phoenix UI on :6006
-
-# 5. Frontend
-cd frontend && npm install && npm run dev   # Vite on :5173, proxies /api -> :8000
+# 4. Frontend (Vite on :5173, proxies /api -> :8000)
+cd frontend && npm install && npm run dev
 ```
 
-**Verify startup:** `curl -s localhost:8000/api/health` should return:
+Open http://localhost:5173. Check the backend with `curl -s localhost:8000/api/health`:
+
 ```json
 {"mode":"fallback","model":"unsloth/gemma-3-4b-it","layer":17,"trackers":[]}
 ```
-(or `"mode":"real"` with the full ml stack).
 
-`GLASSBOX_MODE=posthoc` (default) analyzes each completed turn; `GLASSBOX_MODE=live` streams per-token features. **Demo runs local** — do not stream through a RunPod/Cloudflare proxy.
+Without the `ml` extra (or with no GPU and no weights), the backend reports `"mode":"fallback"` and serves synthetic features, so the whole UI works on any machine. With the `ml` extra, weights present, and a running GPU pod, it reports `"mode":"real"` and the activations, live probes, and Build pipeline are real.
 
-### GPU pod on eduroam (Tailscale)
+Secrets (`ANTHROPIC_API_KEY`, `SENTRY_DSN`, `POD_TOKEN`, `HF_TOKEN`) live only in `.env`, never in `config.yaml`. Sentry receives anomaly flags and scalar metrics only; raw prompts and responses stay local unless you set `observability.sentry.send_io: true`.
 
-Campus WiFi often blocks RunPod public SSH. Use **Tailscale + SSH tunnel** instead:
+## Documentation
 
-```bash
-# Mac terminal A
-./scripts/tunnel_pod.sh 100.98.245.123
+- [`docs/probe-training.md`](docs/probe-training.md) — training and calibrating probe vectors.
+- [`docs/tailscale-pod-runbook.md`](docs/tailscale-pod-runbook.md) — running the GPU pod over Tailscale when campus or office WiFi blocks public SSH.
 
-# Mac terminal B
-./scripts/run_with_pod.sh
-```
+## License
 
-Full restart guide, health checks, and pod-side commands: **`docs/tailscale-pod-runbook.md`**.
-
-Probe-vector training (Family B): **`docs/probe-training.md`**.
-
----
-
-## Verified gotchas (don't relearn these at hour 5)
-
-- **`hidden_states[0]` is the embedding** — sanity-check that `hidden_states[12]` matches SAELens `hook_resid_post` layer-12 numbering once before trusting that both families share one hook.
-- **Gemma is gated** — pre-accept the license + use a *plain* read token, or fall back to `unsloth/gemma-2-2b-it` (ungated, identical weights, same feature indices).
-- **Neuronpedia bulk export is removed** (400s) — use the keyless per-feature GET (cached server-side) or a pre-pulled S3 v1 dump.
-- **Claude adjudication runs async** (`asyncio.create_task`) *after* the event line is emitted, so it never blocks the stream.
-- **`ObservabilityView` is not a custom dashboard** — it's linkout/iframe cards to the live Sentry project + Phoenix (`localhost:6006`).
-
-See `LANES.md` for who-owns-what and the hour-by-hour build order.
+[MIT](LICENSE).
